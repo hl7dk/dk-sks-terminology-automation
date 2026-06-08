@@ -1,0 +1,7 @@
+# Cached source downloads (SKScomplete.txt, ICD-10 CodeSystem, dudal harvest)
+.sks-cache
+.icpc-cache
+# Scratch output dir used by the generators / CI before copying into fhir/
+sks-icd10-out
+__pycache__
+*.DS_Store

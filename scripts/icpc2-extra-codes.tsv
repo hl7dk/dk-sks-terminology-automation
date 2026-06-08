@@ -1,0 +1,24 @@
+# Supplemental ICPC-2 codes for icpc2_icd10_conceptmap.py (--codes-file).
+#
+# The dudal chapter search misses a few genuine codes; these come from the
+# official ICPC-2 Danish code card ("kodekort"):
+#   https://cdn.prod.website-files.com/64673ca65d00b16db04a2f09/64762ac509a553b6dfb3f448_icpc_2_kodekort.pdf
+#
+# Format: CODE<TAB>TITLE  (blank lines and #-comments ignored).
+#
+# D86 is a real diagnosis (Mavesaar IKA) that maps to ICD-10. A30-X37 are the
+# ICPC-1 "procesdiagnoser" (process codes 30-69, "kan anvendes"); they carry no
+# ICD-10 diagnosis mapping, so they appear in the ConceptMap as 'unmatched'.
+# (Note: "B12" extracted from the card is a false positive - it is the substring
+#  of code B81 "Vitamin B12-/folinsyremangelanaemi", not an ICPC code.)
+
+D86	Mavesår IKA
+A30	Komplet helbredsvurdering
+A31	Delvis helbredsundersøgelse
+A43	Anden diagnostisk procedure
+A44	Vaccination
+A45	Sundhedsoplysning
+A49	Lægelig forebyggende procedure
+A62	Administrativ procedure
+W30	Forebyggende svangerskabsundersøgelse
+X37	Cytologi portio uteri
