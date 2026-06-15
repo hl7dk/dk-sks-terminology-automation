@@ -5,8 +5,8 @@
   "version": "2026-03-16",
   "name": "Icd10DanishTranslations",
   "title": "ICD-10 Danish translations (from SKS)",
-  "status": "draft",
-  "experimental": true,
+  "status": "active",
+  "experimental": false,
   "date": "2026-03-16",
   "publisher": "HL7 Denmark",
   "jurisdiction": [

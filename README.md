@@ -19,6 +19,51 @@ canonical URLs (`urn:oid:1.2.208.176.2.4`, `http://hl7.org/fhir/sid/icd-10`,
 `http://hl7.org/fhir/sid/icpc-2`) and resolve them from that server at build
 time — the resources are **not** committed into DK Core.
 
+### Registering a new code system with the terminology servers
+
+When a **new** code system is added here (a new OID or canonical URL), it must
+be registered so the terminology servers know which server hosts it:
+
+- Add the OID / canonical URL to the Nordic tx-server registry:
+  [`hl7-nordics-tx-servers.json`](https://github.com/FHIR/ig-registry/blob/master/hl7-nordics-tx-servers.json).
+- Verify resolution works using the tx registry resolver:
+  <https://tx.fhir.org/tx-reg/resolve>.
+
+Separate / own / **DK-defined** code systems that are *not* hosted on
+`tx.fhir.org` should be uploaded to the Nordic terminology server,
+<https://tx-nordics.fhir.org/fhir>.
+
+**Supplements must live on the same tx server that hosts the master code
+system.** For example, ICD-10 (`http://hl7.org/fhir/sid/icd-10`) is hosted on
+`tx.fhir.org`, so the Danish ICD-10 supplement (`CodeSystem-icd10-da.json`)
+must be added there too — for `tx.fhir.org` that means contributing it to
+[`fhir.tx.support.r4`](https://github.com/FHIR/packages/tree/master/packages/fhir.tx.support.r4).
+
+#### Where each resource lives
+
+```
+                          DK Core IG  (references by canonical URL)
+                                       │
+                  ┌────────────────────┴────────────────────┐
+                  │ resolves via                            │
+                  ▼                                          ▼
+   ┌──────────────────────────────────┐       ┌──────────────────────────────────┐
+   │            tx.fhir.org           │       │      tx-nordics.fhir.org/fhir    │
+   │     (upstream / international)   │       │   (DK-defined, our own systems)  │
+   ├──────────────────────────────────┤       ├──────────────────────────────────┤
+   │ ICD-10  (master)                 │       │ CodeSystem-sks.json              │
+   │   http://hl7.org/fhir/sid/icd-10 │       │   urn:oid:1.2.208.176.2.4        │
+   │                                  │       │                                  │
+   │ ── supplement on the SAME server │       │ CodeSystem-sks-icd10-            │
+   │ CodeSystem-icd10-da.json         │       │   deviations.json                │
+   │   via fhir.tx.support.r4 package │       │                                  │
+   │   (FHIR/packages repo)           │       │ ConceptMap-icpc2-icd10.json      │
+   └──────────────────────────────────┘       └──────────────────────────────────┘
+
+   Register OID / URL ──▶ FHIR/ig-registry  hl7-nordics-tx-servers.json
+   Test resolution    ──▶ https://tx.fhir.org/tx-reg/resolve
+```
+
 ## Generated resources (`fhir/`)
 
 | File | What it is |
