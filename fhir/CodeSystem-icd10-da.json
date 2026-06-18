@@ -2,12 +2,12 @@
   "resourceType": "CodeSystem",
   "id": "icd10-da",
   "url": "http://hl7.dk/fhir/core/CodeSystem/icd10-da",
-  "version": "2026-03-16",
+  "version": "2026-06-16",
   "name": "Icd10DanishTranslations",
   "title": "ICD-10 Danish translations (from SKS)",
   "status": "active",
   "experimental": false,
-  "date": "2026-03-16",
+  "date": "2026-06-16",
   "publisher": "HL7 Denmark",
   "jurisdiction": [
     {
@@ -30244,7 +30244,7 @@
       "designation": [
         {
           "language": "da",
-          "value": "Luksation af øjets naturlige linse"
+          "value": "Aldersbetinget nukleær grå stær"
         }
       ]
     },
@@ -30370,7 +30370,7 @@
       "designation": [
         {
           "language": "da",
-          "value": "Dislokation af øjets krystallinske linse"
+          "value": "Luksation af øjets naturlige linse"
         }
       ]
     },
@@ -61321,7 +61321,7 @@
       "designation": [
         {
           "language": "da",
-          "value": "Temperaturforhøjelse under fødsel IKA"
+          "value": "Feber under fødsel IKA"
         }
       ]
     },
