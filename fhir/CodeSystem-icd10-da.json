@@ -20,7 +20,7 @@
       ]
     }
   ],
-  "description": "Danish-language display supplement for the international ICD-10 code system: the Danish text from the SKS diagnosis register for the ICD-10 codes Denmark reuses unchanged. Generated from SKScomplete.txt and http://hl7.org/fhir/sid/icd-10 version 2019-covid-expanded by scripts/sks_icd10_diff.py. Danish extensions and Danish-only diagnosis blocks are out of scope here (they are not ICD-10 codes) and live in the sks-icd10-deviations CodeSystem instead.",
+  "description": "Danish-language display supplement for the international ICD-10 code system: the Danish text from the SKS diagnosis register for the ICD-10 codes Denmark reuses unchanged. Generated from SKScomplete.txt and http://hl7.org/fhir/sid/icd-10 version 2019-covid-expanded by scripts/sks_icd10_diff.py. Danish extensions and Danish-only diagnosis blocks are out of scope here (they are not ICD-10 codes) and live in the icd10-danish-extensions CodeSystem instead.",
   "caseSensitive": true,
   "content": "supplement",
   "supplements": "http://hl7.org/fhir/sid/icd-10|2019-covid-expanded",
