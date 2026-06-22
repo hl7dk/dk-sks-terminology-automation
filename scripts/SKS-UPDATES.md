@@ -63,7 +63,7 @@ quarterly calendar above is the polling schedule).
 ## What this means for DK Core
 
 The two generated CodeSystems (`CodeSystem-sks.json` and
-`CodeSystem-sks-icd10-deviations.json`, committed under `input/resources/`)
+`CodeSystem-icd10-danish-extensions.json`, committed under `input/resources/`)
 are a snapshot of `SKScomplete.txt` at generation time. To stay aligned with
 the upstream classification they should be **regenerated once per quarter**,
 just after each quarter change.
@@ -78,7 +78,7 @@ To regenerate by hand:
 ```bash
 python3 scripts/sks_icd10_diff.py --force-download
 cp sks-icd10-out/CodeSystem-sks.json                  input/resources/
-cp sks-icd10-out/CodeSystem-sks-icd10-deviations.json input/resources/
+cp sks-icd10-out/CodeSystem-icd10-danish-extensions.json input/resources/
 ```
 
 ### Versioning: the file's revision date

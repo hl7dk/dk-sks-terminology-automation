@@ -57,7 +57,7 @@ subsequent runs.
   `danish_only_block`).
 - `summary.json` — totals plus the additions grouped by ICD-10 chapter and the
   top categories receiving Danish additions (i.e. *where* the additions are).
-- `CodeSystem-sks-icd10-deviations.json` — a standalone **FHIR CodeSystem**
+- `CodeSystem-icd10-danish-extensions.json` — a standalone **FHIR CodeSystem**
   enumerating every Danish deviation/extension (14k+ concepts) as its own
   codes. Default `content: complete` (these are genuinely new codes absent from
   ICD-10, so they form their own code system, not an ICD-10 supplement). Each
@@ -136,6 +136,18 @@ subsequent runs.
   changes when SKS actually releases, so re-runs are byte-identical (no spurious
   diffs) and `version` tells consumers exactly which SKS edition a snapshot is.
   `--sks-version` / `--supplement-version` override it with a custom label.
+- `CodeSystem-sks-diagnoses.json` — a **FHIR CodeSystem** for the legacy SKS
+  diagnosis register (the "D-hierarchy"): the Danish edition of ICD-10 where
+  each code is the ICD-10 code prefixed with a literal `D` (e.g. `DA022` ==
+  ICD-10 `A02.2`), with the Danish display. `content: complete` under the SKS
+  diagnosis sub-OID `urn:oid:1.2.208.176.2.4.12`, so the 3.7.0-style legacy
+  bindings in DK Core (`Condition.code.coding[SKS-D]`,
+  `ServiceRequest.reasonCode.coding[SKS]`) resolve to it with no profile edits.
+  The ICD-10-based model (plain ICD-10 + `icd10-danish-extensions` + the `icd10-da`
+  supplement) is the modern, non-breaking alternative offered alongside it. Each
+  concept carries `status`, `validFrom`/`validTo`, and `parent`/`child` is-a
+  links derived positionally from the D-prefixed code structure. Customise with
+  `--sks-diagnoses-canonical` / `--sks-diagnoses-version`.
 - `CodeSystem-icd10-da.json` — a **FHIR CodeSystem supplement** that adds the
   **Danish display** to the international ICD-10 codes Denmark reuses unchanged.
   `content: supplement`, `supplements: http://hl7.org/fhir/sid/icd-10|<version>`.
@@ -146,17 +158,18 @@ subsequent runs.
   ICD-10 English display; clients get Danish via `displayLanguage=da`). Danish
   extensions and Danish-only
   blocks are *not* here (they are not ICD-10 codes — see
-  `CodeSystem-sks-icd10-deviations.json`). Customise with `--icd10-da-canonical`
+  `CodeSystem-icd10-danish-extensions.json`). Customise with `--icd10-da-canonical`
   and `--icd10-da-version`.
 
-Both `.sks-cache/` and `sks-icd10-out/` are git-ignored. The three generated
+Both `.sks-cache/` and `sks-icd10-out/` are git-ignored. The four generated
 CodeSystems are committed under [`../fhir/`](../fhir/) and **uploaded to the
 Nordic terminology server** (manual step) so the DK Core IG resolves them by
 canonical URL — they are not committed into DK Core:
 
 ```bash
-cp sks-icd10-out/CodeSystem-sks-icd10-deviations.json ../fhir/
+cp sks-icd10-out/CodeSystem-icd10-danish-extensions.json ../fhir/
 cp sks-icd10-out/CodeSystem-sks.json                  ../fhir/
+cp sks-icd10-out/CodeSystem-sks-diagnoses.json        ../fhir/
 cp sks-icd10-out/CodeSystem-icd10-da.json             ../fhir/
 ```
 

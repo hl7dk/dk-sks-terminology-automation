@@ -60,7 +60,7 @@ jobs:
         id: diff
         run: |
           changed=false
-          for f in CodeSystem-sks.json CodeSystem-sks-icd10-deviations.json CodeSystem-icd10-da.json; do
+          for f in CodeSystem-sks.json CodeSystem-sks-diagnoses.json CodeSystem-icd10-danish-extensions.json CodeSystem-icd10-da.json; do
             new="sks-icd10-out/$f"
             old="fhir/$f"
             # Ignore version/date/meta stamps — only concept content matters.
@@ -108,7 +108,8 @@ jobs:
             automated
           add-paths: |
             fhir/CodeSystem-sks.json
-            fhir/CodeSystem-sks-icd10-deviations.json
+            fhir/CodeSystem-sks-diagnoses.json
+            fhir/CodeSystem-icd10-danish-extensions.json
             fhir/CodeSystem-icd10-da.json
 
       - name: Report no change
