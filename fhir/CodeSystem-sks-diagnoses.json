@@ -2,12 +2,12 @@
   "resourceType": "CodeSystem",
   "id": "sks-diagnoses",
   "url": "urn:oid:1.2.208.176.2.4.12",
-  "version": "2026-06-16",
+  "version": "2026-09-17",
   "name": "SKSDiagnoses",
   "title": "SKS Diagnoses - Danish ICD-10 diagnosis register (D-hierarchy)",
   "status": "active",
   "experimental": false,
-  "date": "2026-06-16",
+  "date": "2026-09-17",
   "publisher": "HL7 Denmark",
   "jurisdiction": [
     {
@@ -24,7 +24,7 @@
   "caseSensitive": true,
   "hierarchyMeaning": "is-a",
   "content": "complete",
-  "count": 25063,
+  "count": 25064,
   "property": [
     {
       "code": "status",
@@ -346835,9 +346835,31 @@
         {
           "code": "parent",
           "valueCode": "DO66"
+        },
+        {
+          "code": "child",
+          "valueCode": "DO664A"
         }
       ],
       "display": "Fødsel kompliceret af mislykket forsøg på vaginal fødsel"
+    },
+    {
+      "code": "DO664A",
+      "property": [
+        {
+          "code": "status",
+          "valueCode": "active"
+        },
+        {
+          "code": "validFrom",
+          "valueDateTime": "2026-10-01"
+        },
+        {
+          "code": "parent",
+          "valueCode": "DO664"
+        }
+      ],
+      "display": "Fødsel kompliceret af fastkilet fosterhoved ved kejsersnit"
     },
     {
       "code": "DO665",
