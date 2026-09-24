@@ -116,14 +116,14 @@ class PublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory) / "cs.json"
             original = self.resource()
-            icpc.write_supplement(original, out, True)
+            icpc.write_resource(original, out, True)
             before = out.read_bytes()
             revised = copy.deepcopy(original)
             revised.update(version="2026-09-01", date="2026-09-01", description="Source re-export")
-            self.assertFalse(icpc.write_supplement(revised, out, True))
+            self.assertFalse(icpc.write_resource(revised, out, True))
             self.assertEqual(out.read_bytes(), before)
             revised["concept"][0]["designation"][0]["value"] = "Ny tekst"
-            self.assertTrue(icpc.write_supplement(revised, out, True))
+            self.assertTrue(icpc.write_resource(revised, out, True))
             self.assertEqual(json.loads(out.read_text()), revised)
 
     @patch.object(icpc, "read_rows", return_value=("ICPCKON2-v4", [row("A01", "One"), row("A01", "Two")]))

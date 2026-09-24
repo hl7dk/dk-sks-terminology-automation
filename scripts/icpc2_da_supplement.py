@@ -237,17 +237,38 @@ def semantic_content(resource: dict) -> dict:
     # A source re-export alone does not justify a PR. Keep the last published
     # provenance until the labels or other substantive resource metadata change.
     result = {key: value for key, value in resource.items() if key not in {"version", "date", "meta", "description"}}
-    result["concept"] = sorted(result.get("concept", []), key=lambda c: c["code"])
+    if "concept" in result:
+        result["concept"] = sorted(result["concept"], key=lambda c: c["code"])
     return result
 
 
-def write_supplement(resource: dict, output: Path, only_if_changed: bool) -> bool:
+def write_resource(resource: dict, output: Path, only_if_changed: bool) -> bool:
     if only_if_changed and output.exists():
         previous = json.loads(output.read_text(encoding="utf-8"))
         if semantic_content(previous) == semantic_content(resource):
             return False
     atomic_write(output, (json.dumps(resource, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
     return True
+
+
+def load_source(source_url: str | None, source_file: Path | None,
+                reference_file: Path | None, cache_dir: Path,
+                table: str | None = None) -> tuple[Release, str, list[dict], dict, dict]:
+    """Acquire and validate one KiAP snapshot, shared by both generators."""
+    if source_file and not source_url:
+        raise ValueError("--source-file requires --source-url")
+    release = parse_release(source_url) if source_url else discover_release(fetch(KIAP_PAGE).decode("utf-8"))
+    if source_file:
+        database = source_file
+    else:
+        database = cache_dir / Path(urllib.parse.urlsplit(release.url).path).name
+        atomic_write(database, fetch(release.url))
+    reference = reference_file or cache_dir / "ICPC-2e-v7.0.zip"
+    if not reference.exists() and not reference_file:
+        atomic_write(reference, fetch(REFERENCE_URL))
+    table, rows = read_rows(database, table)
+    labels, details = select_labels(rows, reference_codes(reference))
+    return release, table, rows, labels, details
 
 
 def main(argv=None) -> int:
@@ -264,19 +285,10 @@ def main(argv=None) -> int:
     if args.source_file and not args.source_url:
         parser.error("--source-file requires --source-url")
     try:
-        release = parse_release(args.source_url) if args.source_url else discover_release(fetch(KIAP_PAGE).decode("utf-8"))
-        if args.source_file:
-            database = args.source_file
-        else:
-            database = args.cache_dir / Path(urllib.parse.urlsplit(release.url).path).name
-            atomic_write(database, fetch(release.url))
-        reference = args.reference_file or args.cache_dir / "ICPC-2e-v7.0.zip"
-        if not reference.exists() and not args.reference_file:
-            atomic_write(reference, fetch(REFERENCE_URL))
-        table, rows = read_rows(database, args.table)
-        labels, details = select_labels(rows, reference_codes(reference))
+        release, table, rows, labels, details = load_source(
+            args.source_url, args.source_file, args.reference_file, args.cache_dir, args.table)
         resource = build_supplement(labels, release, table, details["resolved_conflicts"])
-        changed = write_supplement(resource, args.out, args.only_if_changed)
+        changed = write_resource(resource, args.out, args.only_if_changed)
         report = {"source_url": release.url, "source_version": release.version, "source_date": release.date,
                   "table": table, "concepts": len(labels), "changed": changed, **details}
         if args.report:

@@ -6,10 +6,11 @@
 # month. See scripts/SKS-UPDATES.md and:
 # https://sundhedsdatastyrelsen.dk/indberetning/klassifikationer/sks-klassifikationer/opdateringer
 #
-# After a PR merges, the updated CodeSystems in fhir/ must be uploaded to the
-# Nordic terminology server (manual step) so the DK Core IG can resolve them.
-# The ICPC-2 -> ICD-10 ConceptMap is generated manually (licensing) and is not
-# part of this workflow.
+# After merge, publish SKS and Danish extensions to the Nordic server.
+# Contribute the ICD-10 supplement to FHIR/packages (fhir.tx.support).
+# See README.md for the publishing destinations; deployment is manual.
+# The ICPC supplement and ICPC-2 -> ICD-10 ConceptMap are generated from KiAP
+# by the separate icpc-update.yml workflow.
 
 name: Update SKS CodeSystems
 
@@ -101,8 +102,10 @@ jobs:
             The SKS content changed since the committed snapshot. Review the diff
             (new/closed codes, validity, hierarchy) before merging.
 
-            **After merge:** upload the updated `fhir/` CodeSystems to the Nordic
-            terminology server so the DK Core IG can resolve them.
+            **After merge:** publish the SKS CodeSystems and Danish ICD-10
+            extensions to the Nordic terminology server. Contribute the ICD-10
+            Danish supplement to `packages/fhir.tx.support/package/` in
+            `FHIR/packages`, alongside its international base system.
           labels: |
             terminology
             automated

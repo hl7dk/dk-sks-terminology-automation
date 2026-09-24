@@ -1,5 +1,7 @@
 # scripts
 
+Run all command examples from the repository root with Python 3.10+.
+
 > **SKS is updated quarterly.** See [`SKS-UPDATES.md`](SKS-UPDATES.md) for the
 > upstream update cadence (announced ~the 17th of the month before each quarter
 > change; live on the 1st of Jan/Apr/Jul/Oct) and the historical archive. The
@@ -25,9 +27,11 @@ and diffs the SKS diagnosis register (`dia`) against ICD-10.
 
 ### How the mapping works
 
-Every SKS diagnosis code is the ICD-10 code prefixed with a literal `D`
-(*Diagnose*), e.g. SKS `DA022` == ICD-10 `A02.2`. After stripping the `D`
-each code falls into one of three buckets:
+SKS diagnosis codes use a leading `D` (*Diagnose*). Some correspond directly
+to international ICD-10, e.g. `DA022` → `A02.2`; others are Danish extensions
+or Danish-only categories. After stripping the `D`, the generator compares
+candidate codes against the international CodeSystem and assigns one of three
+classifications:
 
 | status              | meaning                                                        | example                |
 |---------------------|----------------------------------------------------------------|------------------------|
@@ -132,14 +136,23 @@ subsequent runs.
   **Versioning:** by default the CodeSystems stamp `version` *and* `date` with
   the SKS source revision date — the `Last-Modified` of `SKScomplete.txt`
   (`YYYY-MM-DD`, e.g. `2026-03-16` for the Q2-2026 release), cached in a
-  `.lastmod` sidecar. SKScomplete has no internal version, and this date only
-  changes when SKS actually releases, so re-runs are byte-identical (no spurious
-  diffs) and `version` tells consumers exactly which SKS edition a snapshot is.
-  `--sks-version` / `--supplement-version` override it with a custom label.
+  `.lastmod` sidecar. SKScomplete has no internal version, so the date
+  identifies the source revision. If the header/sidecar is unavailable, the
+  generator falls back to the run date. Active/retired status is evaluated at
+  run time, and the international ICD-10 input also affects the output; a
+  stable source date alone does not guarantee byte-identical regeneration.
+  `--sks-version`, `--supplement-version`, `--sks-diagnoses-version` and
+  `--icd10-da-version` override the respective resource versions. When present,
+  the source revision still supplies `date`.
+
+  The SKS workflow ignores `version`, `date` and `meta` when comparing snapshots;
+  other resource metadata and concept changes count. An unchanged resource
+  keeps its previously committed version/date, even if another resource is
+  updated from a newer SKS release.
 - `CodeSystem-sks-diagnoses.json` — a **FHIR CodeSystem** for the legacy SKS
-  diagnosis register (the "D-hierarchy"): the Danish edition of ICD-10 where
-  each code is the ICD-10 code prefixed with a literal `D` (e.g. `DA022` ==
-  ICD-10 `A02.2`), with the Danish display. `content: complete` under the SKS
+  diagnosis register (the "D-hierarchy"), including international ICD-10-derived
+  codes and Danish additions, with their D-prefixed codes and Danish displays
+  (e.g. `DA022` corresponds to ICD-10 `A02.2`). `content: complete` under the SKS
   diagnosis sub-OID `urn:oid:1.2.208.176.2.4.12`, so the 3.7.0-style legacy
   bindings in DK Core (`Condition.code.coding[SKS-D]`,
   `ServiceRequest.reasonCode.coding[SKS]`) resolve to it with no profile edits.
@@ -161,61 +174,94 @@ subsequent runs.
   `CodeSystem-icd10-danish-extensions.json`). Customise with `--icd10-da-canonical`
   and `--icd10-da-version`.
 
-Both `.sks-cache/` and `sks-icd10-out/` are git-ignored. The four generated
-CodeSystems are committed under [`../fhir/`](../fhir/) and **uploaded to the
-Nordic terminology server** (manual step) so the DK Core IG resolves them by
-canonical URL — they are not committed into DK Core:
+  The Danish designations are the official SKS short texts, limited to 60
+  characters. The generator preserves SKS attribution, usage conditions and
+  links to the full-text SKS tools in the resource metadata.
+
+Both `.sks-cache/` and `sks-icd10-out/` are git-ignored. Copy the four generated
+CodeSystems into [`fhir/`](../fhir/) for review and commit:
 
 ```bash
-cp sks-icd10-out/CodeSystem-icd10-danish-extensions.json ../fhir/
-cp sks-icd10-out/CodeSystem-sks.json                  ../fhir/
-cp sks-icd10-out/CodeSystem-sks-diagnoses.json        ../fhir/
-cp sks-icd10-out/CodeSystem-icd10-da.json             ../fhir/
+cp sks-icd10-out/CodeSystem-icd10-danish-extensions.json fhir/
+cp sks-icd10-out/CodeSystem-sks.json                  fhir/
+cp sks-icd10-out/CodeSystem-sks-diagnoses.json        fhir/
+cp sks-icd10-out/CodeSystem-icd10-da.json             fhir/
 ```
+
+After merge, publish the SKS CodeSystems and Danish ICD-10 extensions to the
+Nordic terminology server. Contribute `CodeSystem-icd10-da.json` to
+`packages/fhir.tx.support/package/` in `FHIR/packages`, alongside its
+international base system. See the [publishing destinations](../README.md#generated-resources-fhir).
 
 ## `icpc2_icd10_conceptmap.py`
 
-Builds a FHIR R4 **ConceptMap** mapping Danish **ICPC-2 → ICD-10**, harvested
-from the public sundhed.dk / dudal ICPC tool
-(<https://dake2.dudal.com/icpc/>). It enumerates the 17 ICPC-2 chapters via the
-tool's `icpcserver.php` backend, converts every rubric to its SKS `D`-prefixed
-ICD-10 codes, turns those back into ICD-10 form (displays resolved against the
-ICD-10 CodeSystem cached by `sks_icd10_diff.py`, if present), and emits one
-ConceptMap (`source` `http://hl7.org/fhir/sid/icpc-2`, `target`
-`http://hl7.org/fhir/sid/icd-10`).
+Builds the FHIR R4 **ICPC-2 → ICD-10 ConceptMap** from KiAP's published
+ICPC-2-DK Access database. Both the mapping and the Danish labels come from
+its **forward `ICPCKON2` table**. The separate `ICD10-ICPC` reverse register
+has different coverage; it is neither inverted nor combined with this table.
+
+Requires Python 3.10+ and `mdbtools` (installation below). Generate both ICPC
+resources from one validated source snapshot:
 
 ```bash
 python3 scripts/icpc2_icd10_conceptmap.py \
-  --codes-file scripts/icpc2-extra-codes.tsv \
-  --out fhir/ConceptMap-icpc2-icd10.json
-python3 scripts/icpc2_icd10_conceptmap.py --force   # re-harvest from the source
+  --supplement-out fhir/CodeSystem-icpc2E-DK.json \
+  --only-if-changed --report .icpc-kiap-cache/report.json
+
+# Reproduce using local inputs, with no network requests.
+python3 scripts/icpc2_icd10_conceptmap.py \
+  --source-url https://web.kiap.dk/resources/files/icpc/systemhuse/ICPC_v4_4_20260629.accdb \
+  --source-file .icpc-kiap-cache/ICPC_v4_4_20260629.accdb \
+  --reference-file .icpc-kiap-cache/ICPC-2e-v7.0.zip \
+  --icd10-file .icpc-kiap-cache/icd10.json \
+  --supplement-out fhir/CodeSystem-icpc2E-DK.json
 ```
 
-Equivalence: a rubric mapping to exactly one ICD-10 code is `equivalent`; one
-mapping to several is `narrower` (the ICPC-2 rubric is broader than each
-ICD-10 code). The chapter search misses a few codes, so `--codes-file`
-supplements it from the official ICPC-2 code card (`icpc2-extra-codes.tsv`):
-this adds the real diagnosis `D86` plus the ICPC-1 *process* codes (emitted
-`unmatched`). Result: 695 ICPC-2 codes, 686 mapped, ~9.3k ICD-10 targets. HTTP
-responses are cached under `.icpc-cache/` (git-ignored) so re-runs are offline
-and the source is hit only once; the run is polite (`--sleep`, identifying
-User-Agent).
+Without `--supplement-out`, only the ConceptMap is written. Online runs
+discover and download the latest KiAP database and fetch the international
+ICD-10 CodeSystem from `tx.fhir.org/r4`. The Danish extensions and SKS diagnoses
+are read from the committed `fhir/` snapshots; `--extensions-file` and
+`--sks-file` can override these. The source loader, ICPC code validation and
+reviewed label resolutions are shared with the supplement generator.
 
-> ⚠️ **Licensing.** ICPC-2 is copyright **WONCA**; the Danish **ICPC-2-DK**
-> rights are held by **DSAM**, and the mapping data originates from sundhed.dk.
-> The generated ConceptMap is a *convenience* mapping, **not** an authoritative
-> or openly-licensed artifact — only use/redistribute it within the terms under
-> which you hold ICPC-2-DK rights. For that reason it is **not** part of the
-> automated quarterly workflow; generate and upload it deliberately.
+The KiAP 4.4 snapshot has **2,476 mapping pairs covering all 686 ICPC codes**,
+including W91. Process and grouping codes are outside the symptom/diagnosis
+scope.
 
+- Every target is resolved against an actual CodeSystem: international ICD-10
+  first, Danish extensions through their exact `sksCode` property next, and
+  the SKS diagnosis register as a fallback. Unresolved targets fail generation.
+  Each system has its own ConceptMap group with a separate `targetVersion`.
+  The current snapshot has 1,910 international and 566 Danish-extension pairs.
+- Source and target displays use KiAP's Danish texts, normalizing whitespace.
+- Relationships are conservatively `relatedto`. KiAP's `Udl=1` preferred match
+  and `Udl=0` additional match are retained in target comments. Neither the
+  number of targets nor the preferred flag establishes clinical equivalence.
+- The forward table's `Gyldig fra dato` contains creation, change and closing
+  dates. Include mappings active on the source release date (inclusive start,
+  exclusive closing date), rather than changing output with today's date.
+  KiAP 4.4 has one reviewed typo in the middle date for A01/DR521. Its intact
+  start/end dates are used and the defect is recorded in the resource and
+  report. Other malformed dates fail; no date is guessed.
+- Require active mappings for all expected ICPC symptom/diagnosis codes.
+  Unknown flags, conflicting duplicate pairs, schema changes and unknown
+  codes fail before either resource is written.
+- Version/date identify the KiAP source release. With `--only-if-changed`,
+  date/filename-only re-exports preserve the existing snapshot. Mapping,
+  label, flag and target-system/version changes cause an update.
+
+The resource remains `draft` and `experimental`. WONCA/DSAM attribution and
+usage conditions are preserved; automation does not grant additional rights.
+After reviewing and merging an update, publish the ConceptMap to the Nordic
+terminology server. The workflow creates a PR but does not deploy resources.
 
 ## `icpc2_da_supplement.py`
 
 Builds `fhir/CodeSystem-icpc2E-DK.json` directly from KiAP's ICPC-2-DK Access
-release, rather than the dudal lookup tool. The source is the `ICPC-kode` and
-`ICPC-diagnose` columns of the `ICPCKON2-...` mapping table. Repeated ICD-10
-mapping rows are deduplicated by ICPC code; this does not regenerate the
-ICPC-to-ICD-10 ConceptMap.
+release. The source is the `ICPC-kode` and `ICPC-diagnose` columns of the
+`ICPCKON2-...` mapping table. Repeated ICD-10 mapping rows are deduplicated by ICPC code. This standalone command writes
+only the supplement; the ConceptMap command above and the scheduled workflow
+generate both resources together.
 
 ### Run locally
 
@@ -269,9 +315,8 @@ it is not selected by page order. Changed naming conventions require review.
   its code and labels. If KiAP resolves a conflict to a single label, use it.
 - Set `version` and `date` to the source filename's release date, initially
   `2026-06-29`. The KiAP business version (`4.4`), exact URL, table, and applied
-  conflict resolutions are recorded in the description. This date-based
-  convention replaces the publication-date stamp used for the earlier manual
-  ICPC supplement; identical inputs produce identical output.
+  conflict resolutions are recorded in the description. Identical inputs
+  produce identical output.
 - Preserve WONCA/DSAM attribution and licensing references. Automation does
   not grant additional usage or redistribution rights.
 
@@ -287,11 +332,13 @@ metadata. `--report PATH` writes source/validation details separately.
 [`.github/workflows/icpc-update.yml`](../.github/workflows/icpc-update.yml)
 runs weekly and on manual dispatch, independently of the SKS workflow. It:
 
-1. Runs the offline tests, discovers the latest KiAP release, and regenerates.
+1. Runs the offline tests, discovers the latest KiAP release, and generates
+   both the supplement and ConceptMap from the same database.
 2. Opens or updates one PR on `chore/icpc-supplement-update` when substantive
-   content differs from the default branch. It commits only the ICPC supplement.
+   content differs from the default branch. It commits only the ICPC supplement
+   and ConceptMap.
 3. Leaves unchanged runs without a new PR, and reconciles an existing PR if
-   the upstream change is reverted. It never merges or deploys the resource.
+   the upstream change is reverted. It never merges or deploys the resources.
 
 Enable **Settings → Actions → General → Workflow permissions → Allow GitHub
 Actions to create and approve pull requests** in GitHub (or the corresponding
@@ -300,12 +347,8 @@ and `pull-requests: write`; no extra secret is needed. Tests on pull requests
 have read-only permissions, and the update job runs only on schedule/dispatch.
 The schedule becomes active when the workflow is on the default branch.
 
-After reviewing and merging the generated PR, contribute the updated resource
+After reviewing and merging the generated PR, contribute the updated supplement
 to `packages/fhir.tx.support/package/` in `FHIR/packages`, alongside the base
-ICPC-2 system. This workflow creates PRs in this automation repository; it does
-not open cross-repository PRs or upload resources to terminology servers.
-
-The ICD-10 Danish supplement generator also retains the SKS attribution,
-source usage conditions and the explanation that its labels are the official
-60-character short texts, with links to the full-text SKS tools. These fields
-are regenerated, so an SKS update will not remove them.
+ICPC-2 system. Publish the updated ConceptMap to the Nordic terminology server.
+This workflow creates PRs in this automation repository; it does not open
+cross-repository PRs or upload resources to terminology servers.

@@ -1,4 +1,4 @@
-# Cached source downloads (SKScomplete.txt, ICD-10 CodeSystem, dudal harvest)
+# Cached source downloads
 .sks-cache
 .icpc-cache
 # Scratch output dir used by the generators / CI before copying into fhir/
