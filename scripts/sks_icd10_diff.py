@@ -106,6 +106,25 @@ SUPPLEMENT_CANONICAL = "http://hl7.dk/fhir/core/CodeSystem/icd10-danish-extensio
 
 # Canonical for the ICD-10 Danish-translation supplement (DK Core IG).
 ICD10_DA_CANONICAL = "http://hl7.dk/fhir/core/CodeSystem/icd10-da"
+SKS_SHORT_LABEL_NOTE = (
+    ' The Danish designations are the short code texts from the official SKS exchange format, '
+    'limited to 60 characters; they may be abbreviated or truncated. Full code texts are '
+    'available through the [SKS browser](https://medinfo.dk/sks/brows.php) and [SKS export '
+    'tool](https://medinfo.dk/sks/dump.php). Those services are updated independently of this '
+    "versioned supplement; see [Sundhedsdatastyrelsen's explanation of the text "
+    'formats](https://sundhedsdatastyrelsen.dk/indberetning/klassifikationer/sks-klassifikationer/vaerktoejer).'
+)
+SKS_COPYRIGHT = (
+    'The Danish SKS code texts are sourced from Sundhedsdatastyrelsen (Danish Health Data '
+    'Authority), which holds copyright in the SKS database and extracts. Under its published '
+    'usage conditions, the classifications may be used in IT solutions, but the '
+    'classifications themselves must not be commercially exploited, and classifications used '
+    'in user-facing solutions must be kept consistent with the latest versions published by '
+    'Sundhedsdatastyrelsen. See the [SKS usage '
+    'conditions](https://sundhedsdatastyrelsen.dk/indberetning/klassifikationer/sks-klassifikationer/download-sks) '
+    "and [database attribution](https://medinfo.dk/sks/dump.php). The containing package's CC0 "
+    'license does not override these source terms for the SKS content.'
+)
 
 # Identifier for the full Danish SKS CodeSystem (the SKS root OID).
 SKS_CANONICAL = "urn:oid:1.2.208.176.2.4"
@@ -994,7 +1013,7 @@ def build_icd10_da_supplement(rows: list[dict], icd: Icd10, system: str,
         "url": canonical,
         "version": version,
         "name": "Icd10DanishTranslations",
-        "title": "ICD-10 Danish translations (from SKS)",
+        "title": "ICD-10 Danish translations (as created by SKS)",
         "status": "active",
         "experimental": False,
         "date": dt.date.today().isoformat(),
@@ -1006,10 +1025,12 @@ def build_icd10_da_supplement(rows: list[dict], icd: Icd10, system: str,
             "Danish-language display supplement for the international ICD-10 "
             "code system: the Danish text from the SKS diagnosis register for "
             "the ICD-10 codes Denmark reuses unchanged. Generated from "
-            f"SKScomplete.txt and {system} version {icd.version} by "
-            "scripts/sks_icd10_diff.py. Danish extensions and Danish-only "
+            f"SKScomplete.txt and {system} version {icd.version}. "
+            "Danish extensions and Danish-only "
             "diagnosis blocks are out of scope here (they are not ICD-10 "
-            "codes) and live in the icd10-danish-extensions CodeSystem instead."),
+            "codes) and live in the icd10-danish-extensions CodeSystem instead."
+            + SKS_SHORT_LABEL_NOTE),
+        "copyright": SKS_COPYRIGHT,
         "caseSensitive": True,
         "content": "supplement",
         "supplements": f"{system}|{icd.version}",

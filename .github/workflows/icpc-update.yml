@@ -1,0 +1,105 @@
+name: Update ICPC Danish supplement
+
+on:
+  schedule:
+    - cron: "23 6 * * 1" # Weekly: discover releases from KiAP, not a fixed filename.
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: "Optional KiAP .accdb URL (default: latest release on the KiAP page)"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - "scripts/icpc2_da_supplement.py"
+      - "tests/test_icpc2_da_supplement.py"
+      - "fhir/CodeSystem-icpc2E-DK.json"
+      - ".github/workflows/icpc-update.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/icpc2_da_supplement.py"
+      - "tests/test_icpc2_da_supplement.py"
+      - "fhir/CodeSystem-icpc2E-DK.json"
+      - ".github/workflows/icpc-update.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m unittest discover -s tests -v
+
+  regenerate:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: icpc-supplement-update
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Access database reader
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes mdbtools
+      - name: Regenerate from KiAP
+        id: generate
+        env:
+          SOURCE_URL: ${{ inputs.source_url }}
+        run: |
+          args=()
+          if [ -n "$SOURCE_URL" ]; then
+            args+=(--source-url "$SOURCE_URL")
+          fi
+          python3 scripts/icpc2_da_supplement.py "${args[@]}" \
+            --only-if-changed --report .icpc-kiap-cache/report.json
+      # Run even with no local diff: the action also closes a stale update PR
+      # if upstream has reverted to the content already on the default branch.
+      - name: Create or update pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/icpc-supplement-update
+          base: ${{ github.event.repository.default_branch }}
+          delete-branch: true
+          commit-message: "Update ICPC Danish supplement from KiAP ${{ steps.generate.outputs.source_version }} (${{ steps.generate.outputs.source_date }})"
+          title: "Update ICPC Danish supplement from KiAP ${{ steps.generate.outputs.source_version }} (${{ steps.generate.outputs.source_date }})"
+          body: |
+            Regenerates the Danish ICPC-2 designation supplement from KiAP's published database.
+
+            - Source: ${{ steps.generate.outputs.source_url }}
+            - KiAP release: ${{ steps.generate.outputs.source_version }} (${{ steps.generate.outputs.source_date }})
+            - Concepts: ${{ steps.generate.outputs.concepts }}
+            - Generator: `scripts/icpc2_da_supplement.py`
+
+            Codes are checked against international ICPC-2e v7.0. Known source
+            label conflicts are handled explicitly; new conflicts fail generation.
+            Only substantive content changes are committed, not source date or
+            filename changes alone. WONCA/DSAM rights remain applicable.
+
+            After review and merge, contribute the updated supplement to
+            `packages/fhir.tx.support/package/` in FHIR/packages for distribution
+            alongside the base ICPC-2 system. This workflow does not deploy it.
+          labels: |
+            terminology
+            automated
+          add-paths: fhir/CodeSystem-icpc2E-DK.json
+      - name: Report no change
+        if: steps.generate.outputs.changed != 'true'
+        run: echo "ICPC supplement content unchanged."

@@ -5,3 +5,6 @@
 sks-icd10-out
 __pycache__
 *.DS_Store
+
+# KiAP Access database and international ICPC reference downloads
+.icpc-kiap-cache

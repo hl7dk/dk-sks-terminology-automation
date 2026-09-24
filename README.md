@@ -72,6 +72,7 @@ must be added there too — for `tx.fhir.org` that means contributing it to
 | `CodeSystem-sks-diagnoses.json` | The legacy SKS diagnosis register (the "D-hierarchy", Danish ICD-10 with `D`-prefixed codes). `content: complete` under `urn:oid:1.2.208.176.2.4.12`. Keeps the 3.7.0-style SKS diagnosis codings resolvable alongside the ICD-10-based model. |
 | `CodeSystem-icd10-danish-extensions.json` | Danish diagnosis codes that are not plain ICD-10 (extensions + Danish-only blocks). |
 | `CodeSystem-icd10-da.json` | A **supplement** adding Danish `da` designations to the international ICD-10 codes Denmark reuses. |
+| `CodeSystem-icpc2E-DK.json` | A **supplement** adding KiAP Danish symptom/diagnosis labels to international ICPC-2. |
 | `ConceptMap-icpc2-icd10.json` | ICPC-2 → ICD-10 mapping (harvested from the public sundhed.dk/dudal tool). |
 
 `version`/`date` on the SKS-derived resources track the **source revision date**
@@ -99,10 +100,32 @@ python3 scripts/icpc2_icd10_conceptmap.py \
 ## Automation
 
 `.github/workflows/sks-update.yml` runs on the quarterly SKS cadence (and on
-demand), regenerates the three SKS/ICD-10 CodeSystems, and opens a PR **only
+demand), regenerates the four SKS/ICD-10 CodeSystems, and opens a PR **only
 when the content actually changed**. After merging, upload `fhir/` to the
 Nordic terminology server.
 
 The **ICPC-2 ConceptMap is not automated** — it is harvested from a third-party
 tool and ICPC-2 is copyright WONCA / DSAM (see the licensing note in
 `scripts/README.md`); regenerate it deliberately.
+
+
+The **ICPC-2 Danish supplement is automated** by
+[`.github/workflows/icpc-update.yml`](.github/workflows/icpc-update.yml).
+Weekly and on manual dispatch it discovers the latest KiAP Access database,
+regenerates `fhir/CodeSystem-icpc2E-DK.json`, and opens or updates a PR only for
+substantive changes. The initial snapshot is KiAP 4.4 (2026-06-29), with 686
+Danish designations. Unlike the manual ConceptMap harvest, this uses KiAP's
+published release directly. WONCA/DSAM licensing terms remain attached.
+
+```bash
+# Install mdbtools first (brew install mdbtools / apt-get install mdbtools).
+python3 scripts/icpc2_da_supplement.py --only-if-changed
+python3 -m unittest discover -s tests -v
+```
+
+See [ICPC generation and workflow setup](scripts/README.md#icpc2_da_supplementpy)
+for the reviewed source conflicts, source-date versioning, offline runs, and
+the GitHub setting that allows Actions to create PRs. Merge the workflow into
+the default branch to enable its schedule. After merging an update PR, publish
+the supplement through `packages/fhir.tx.support/package/` in `FHIR/packages`;
+this automation does not deploy it or open a PR in that separate repository.

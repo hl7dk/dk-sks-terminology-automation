@@ -207,3 +207,105 @@ User-Agent).
 > or openly-licensed artifact — only use/redistribute it within the terms under
 > which you hold ICPC-2-DK rights. For that reason it is **not** part of the
 > automated quarterly workflow; generate and upload it deliberately.
+
+
+## `icpc2_da_supplement.py`
+
+Builds `fhir/CodeSystem-icpc2E-DK.json` directly from KiAP's ICPC-2-DK Access
+release, rather than the dudal lookup tool. The source is the `ICPC-kode` and
+`ICPC-diagnose` columns of the `ICPCKON2-...` mapping table. Repeated ICD-10
+mapping rows are deduplicated by ICPC code; this does not regenerate the
+ICPC-to-ICD-10 ConceptMap.
+
+### Run locally
+
+Requires Python 3.10+ and [mdbtools](https://github.com/mdbtools/mdbtools):
+
+```bash
+# macOS
+brew install mdbtools
+# Debian / Ubuntu
+sudo apt-get install mdbtools
+
+# Discover the latest dated .accdb link on the KiAP page and regenerate.
+python3 scripts/icpc2_da_supplement.py --only-if-changed
+
+# Select a specific published release.
+python3 scripts/icpc2_da_supplement.py \
+  --source-url https://web.kiap.dk/resources/files/icpc/systemhuse/ICPC_v4_4_20260629.accdb
+
+# Reproduce offline with previously downloaded files.
+python3 scripts/icpc2_da_supplement.py \
+  --source-url https://web.kiap.dk/resources/files/icpc/systemhuse/ICPC_v4_4_20260629.accdb \
+  --source-file .icpc-kiap-cache/ICPC_v4_4_20260629.accdb \
+  --reference-file .icpc-kiap-cache/ICPC-2e-v7.0.zip \
+  --out /tmp/CodeSystem-icpc2E-DK.json
+
+python3 -m unittest discover -s tests -v
+```
+
+There are no Python package dependencies. `mdb-tables` and `mdb-export` read the
+Access database; Access macros and queries are not run. Source data is refreshed
+on every online run (including updates under the same filename), and the
+international reference ZIP is cached in `.icpc-kiap-cache/`. The latest KiAP
+release is selected by numeric release version, then the date in its filename;
+it is not selected by page order. Changed naming conventions require review.
+
+### Content, provenance and versioning
+
+- Emit a `da` designation for each international symptom/diagnosis code. The
+  initial KiAP 4.4 snapshot contains 686 codes.
+- Normalize whitespace, keeping KiAP's wording, abbreviations and punctuation.
+- Validate codes against the pinned international ICPC-2e v7.0 ClaML archive
+  published by Helsedirektoratet on behalf of WICC. A new KiAP code absent from
+  that reference fails generation, so the reference must be reviewed before
+  expanding the supplement. Missing expected codes and empty labels also fail.
+- Exclude `*00` grouping/unknown entries and process codes. They are outside
+  this supplement's symptom/diagnosis scope.
+- KiAP 4.4 has conflicting labels across mapping rows. The reviewed selections
+  are `P70: Demens`, `R83: Infektion i luftveje IKA`, and `S12: Insektstik`.
+  These are not unconditional overrides: only the exact reviewed sets of
+  conflicting labels are accepted. A new conflict or changed set fails with
+  its code and labels. If KiAP resolves a conflict to a single label, use it.
+- Set `version` and `date` to the source filename's release date, initially
+  `2026-06-29`. The KiAP business version (`4.4`), exact URL, table, and applied
+  conflict resolutions are recorded in the description. This date-based
+  convention replaces the publication-date stamp used for the earlier manual
+  ICPC supplement; identical inputs produce identical output.
+- Preserve WONCA/DSAM attribution and licensing references. Automation does
+  not grant additional usage or redistribution rights.
+
+`--only-if-changed` compares the generated resource with the existing output,
+ignoring `version`, `date`, `meta` and `description`. A date/filename-only
+re-export therefore leaves the previous snapshot and provenance untouched;
+label changes and other resource metadata changes are written atomically.
+Without this flag, regenerate the full artifact including its current source
+metadata. `--report PATH` writes source/validation details separately.
+
+### Scheduled pull requests
+
+[`.github/workflows/icpc-update.yml`](../.github/workflows/icpc-update.yml)
+runs weekly and on manual dispatch, independently of the SKS workflow. It:
+
+1. Runs the offline tests, discovers the latest KiAP release, and regenerates.
+2. Opens or updates one PR on `chore/icpc-supplement-update` when substantive
+   content differs from the default branch. It commits only the ICPC supplement.
+3. Leaves unchanged runs without a new PR, and reconciles an existing PR if
+   the upstream change is reverted. It never merges or deploys the resource.
+
+Enable **Settings → Actions → General → Workflow permissions → Allow GitHub
+Actions to create and approve pull requests** in GitHub (or the corresponding
+organization setting). The workflow uses `GITHUB_TOKEN` with `contents: write`
+and `pull-requests: write`; no extra secret is needed. Tests on pull requests
+have read-only permissions, and the update job runs only on schedule/dispatch.
+The schedule becomes active when the workflow is on the default branch.
+
+After reviewing and merging the generated PR, contribute the updated resource
+to `packages/fhir.tx.support/package/` in `FHIR/packages`, alongside the base
+ICPC-2 system. This workflow creates PRs in this automation repository; it does
+not open cross-repository PRs or upload resources to terminology servers.
+
+The ICD-10 Danish supplement generator also retains the SKS attribution,
+source usage conditions and the explanation that its labels are the official
+60-character short texts, with links to the full-text SKS tools. These fields
+are regenerated, so an SKS update will not remove them.
