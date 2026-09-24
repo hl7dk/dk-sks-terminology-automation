@@ -2,12 +2,12 @@
   "resourceType": "CodeSystem",
   "id": "icd10-danish-extensions",
   "url": "http://hl7.dk/fhir/core/CodeSystem/icd10-danish-extensions",
-  "version": "2026-06-16",
+  "version": "2026-09-17",
   "name": "Icd10DanishExtensions",
   "title": "Danish extensions and deviations to ICD-10",
   "status": "active",
   "experimental": false,
-  "date": "2026-06-16",
+  "date": "2026-09-17",
   "publisher": "HL7 Denmark",
   "jurisdiction": [
     {
@@ -24,7 +24,7 @@
   "caseSensitive": true,
   "hierarchyMeaning": "is-a",
   "content": "complete",
-  "count": 14500,
+  "count": 14501,
   "property": [
     {
       "code": "deviationType",
@@ -282358,6 +282358,36 @@
         }
       ],
       "display": "Fødsel kompliceret af hydrops hos foster"
+    },
+    {
+      "code": "O66.4A",
+      "property": [
+        {
+          "code": "deviationType",
+          "valueCode": "extension"
+        },
+        {
+          "code": "sksCode",
+          "valueCode": "DO664A"
+        },
+        {
+          "code": "status",
+          "valueCode": "active"
+        },
+        {
+          "code": "baseCategory",
+          "valueCode": "O66"
+        },
+        {
+          "code": "icd10Chapter",
+          "valueCode": "XV"
+        },
+        {
+          "code": "validFrom",
+          "valueDateTime": "2026-10-01"
+        }
+      ],
+      "display": "Fødsel kompliceret af fastkilet fosterhoved ved kejsersnit"
     },
     {
       "code": "O66.5A",
