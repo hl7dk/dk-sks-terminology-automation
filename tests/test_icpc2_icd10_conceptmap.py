@@ -30,7 +30,8 @@ def catalogs():
 
 def row(code="A01", target="DR529", flag="1", history="200801012026050125000101"):
     return {"ICPC-kode": code, "ICPC-diagnose": "Almen smerte", "ICD10-kode": target,
-            "ICD10-diagnose": "Smerte UNS", "Udl": flag, "Gyldig fra dato": history}
+            "ICD10-diagnose": "Smerte UNS", "Udl": flag, "Gyldig fra dato": history,
+            **{field: "" for field, _, _ in mapping.kiap.GUIDANCE_FIELDS}}
 
 
 def build(rows=None, labels=None):
@@ -117,12 +118,12 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(report["mapping_pairs"], 1)
 
     def test_history_errors_fail_except_exact_reviewed_typo(self):
-        start, end, warning = mapping.validity(*mapping.KNOWN_HISTORY_TYPO)
-        self.assertEqual((start, end, warning), (dt.date(2024, 7, 1), mapping.OPEN_END, True))
+        start, end, warning = mapping.kiap.validity(*mapping.kiap.KNOWN_HISTORY_TYPO)
+        self.assertEqual((start, end, warning), (dt.date(2024, 7, 1), mapping.kiap.OPEN_END, True))
         for history in ("", "20240701206010125000102", "200802302026050125000101",
                         "202606292026010125000101", "200801012026050120070101"):
             with self.subTest(history=history), self.assertRaises(ValueError):
-                mapping.validity("A01", "DR521", history)
+                mapping.kiap.validity("A01", "DR521", history)
 
 
 class PublicationTests(unittest.TestCase):
@@ -141,6 +142,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_shared_generation_and_failure_preserve_both_outputs(self):
         source = (RELEASE, "ICPCKON2-v4", [row()], {"A01": "Almen smerte"}, {"resolved_conflicts": {}})
+        source[2][0]["Kriterier"] = "Danske kriterier"
         with tempfile.TemporaryDirectory() as directory, patch.object(mapping.kiap, "load_source", return_value=source) as load:
             root = Path(directory)
             files = []
@@ -155,7 +157,14 @@ class PublicationTests(unittest.TestCase):
                 self.assertEqual(mapping.main(args), 0)
                 load.assert_called_once()
                 self.assertIn("mapping_pairs=1", (root / "outputs").read_text())
+                self.assertEqual(json.loads(supplement.read_text())["concept"][0]["property"],
+                                 [{"code": "criteria", "valueString": "Danske kriterier"}])
                 before = output.read_bytes(), supplement.read_bytes()
+                # A valid map with invalid guidance must preserve both published artifacts.
+                del source[2][0]["Bemærk"]
+                self.assertEqual(mapping.main(args), 1)
+                self.assertEqual((output.read_bytes(), supplement.read_bytes()), before)
+                source[2][0]["Bemærk"] = ""
                 source[2][0]["ICD10-kode"] = "DUNKNOWN"
                 self.assertEqual(mapping.main(args), 1)
                 self.assertEqual((output.read_bytes(), supplement.read_bytes()), before)

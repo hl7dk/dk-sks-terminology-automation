@@ -38,6 +38,17 @@ REFERENCE_URL = (
 USER_AGENT = "dk-sks-terminology-automation/1.0 (+https://github.com/hl7dk/dk-sks-terminology-automation)"
 RELEASE_RE = re.compile(r"ICPC[_-]v(\d+(?:[_.]\d+)*)[_-](\d{8})\.accdb", re.I)
 CODE_RE = re.compile(r"[ABDFHKLNPRSTUWXYZ](?:0[1-9]|[12]\d|[789]\d)")
+OPEN_END = dt.date(2500, 1, 1)
+# Reviewed KiAP 4.4 typo in the middle (last-modified) date; endpoints are intact.
+KNOWN_HISTORY_TYPO = ("A01", "DR521", "20240701206010125000101")
+# Local property URIs identify these Danish narrative fields, not executable rules.
+GUIDANCE_FIELDS = (
+    ("Kriterier", "criteria", "Criteria for assigning the ICPC concept."),
+    ("Inkl", "inclusion", "Terms and conditions included under the ICPC concept."),
+    ("Ekskl", "exclusion", "Conditions to code elsewhere, including source cross-references."),
+    ("Overvej", "consider", "Alternative ICPC concepts to consider."),
+    ("Bemærk", "note", "Supplementary coding notes for the ICPC concept."),
+)
 # Reviewed against KiAP 4.4 and international ICPC-2e v7.0. Only these exact
 # conflicting sets are accepted. A new label, even on these codes, needs review.
 RESOLUTIONS = {
@@ -202,7 +213,91 @@ def select_labels(rows: list[dict], base_codes: set[str]) -> tuple[dict[str, str
     return selected, {"excluded_codes": sorted(excluded), "resolved_conflicts": applied}
 
 
-def build_supplement(labels: dict[str, str], release: Release, table: str, resolved: dict) -> dict:
+def validity(code: str, target: str, history: str) -> tuple[dt.date, dt.date, bool]:
+    """KiAP forward table stores creation, last change, closure (YYYYMMDD each)."""
+    known_typo = (code, target, history) == KNOWN_HISTORY_TYPO
+    if not re.fullmatch(r"\d{24}", history) and not known_typo:
+        raise ValueError(f"Invalid KiAP history for {code}/{target}: {history!r}")
+    start = dt.datetime.strptime(history[:8], "%Y%m%d").date()
+    end = dt.datetime.strptime(history[-8:], "%Y%m%d").date()
+    if not known_typo:
+        changed = dt.datetime.strptime(history[8:16], "%Y%m%d").date()
+        if changed < start:
+            raise ValueError(f"Last-change date precedes creation for {code}/{target}")
+    if end < start:
+        raise ValueError(f"Closing date precedes creation for {code}/{target}")
+    return start, end, known_typo
+
+
+def select_guidance(rows: list[dict], labels: dict[str, str], release: Release) -> tuple[dict, dict]:
+    """Extract concept guidance from active preferred rows (KiAP spec §8.1.2).
+
+    Additional-match rows can describe a specific ICD-10 diagnosis. Report their
+    text separately instead of promoting it to an ICPC-wide property.
+    """
+    required = {"ICPC-kode", "ICD10-kode", "Udl", "Gyldig fra dato"}
+    required.update(field for field, _, _ in GUIDANCE_FIELDS)
+    if not rows or not required <= rows[0].keys():
+        raise ValueError(f"Missing required guidance columns: {sorted(required)}")
+    as_of = dt.date.fromisoformat(release.date)
+    preferred = set()
+    values = defaultdict(lambda: defaultdict(set))
+    additional = {}
+    for row in rows:
+        code = (row.get("ICPC-kode") or "").strip()
+        if code not in labels:
+            continue
+        if not required <= row.keys():
+            raise ValueError(f"Missing required guidance columns for {code}")
+        target = (row["ICD10-kode"] or "").strip().upper()
+        flag = (row["Udl"] or "").strip()
+        if flag not in {"0", "1"}:
+            raise ValueError(f"Unknown preferred-match flag for {code}/{target}: {flag!r}")
+        start, end, _ = validity(code, target, (row["Gyldig fra dato"] or "").strip())
+        if not start <= as_of < end:
+            continue
+        properties = [
+            {"code": prop, "valueString": text}
+            for field, prop, _ in GUIDANCE_FIELDS
+            if (text := " ".join((row[field] or "").split()))
+        ]
+        if flag == "1":
+            preferred.add(code)
+            for prop in properties:
+                values[code][prop["code"]].add(prop["valueString"])
+        else:
+            key = (code, target)
+            if key in additional and additional[key] != properties:
+                raise ValueError(f"Conflicting additional-match guidance for {code}/{target}")
+            additional[key] = properties
+    missing = labels.keys() - preferred
+    if missing:
+        raise ValueError(f"No active preferred row for ICPC guidance: {', '.join(sorted(missing))}")
+    selected = {}
+    counts = {prop: 0 for _, prop, _ in GUIDANCE_FIELDS}
+    for code in sorted(values):
+        properties = []
+        for _, prop, _ in GUIDANCE_FIELDS:
+            texts = values[code][prop]
+            if len(texts) > 1:
+                raise ValueError(f"Conflicting preferred guidance for {code}/{prop}: {sorted(texts)}")
+            if texts:
+                properties.append({"code": prop, "valueString": next(iter(texts))})
+                counts[prop] += 1
+        if properties:
+            selected[code] = properties
+    return selected, {
+        "guidance_concepts": len(selected),
+        "guidance_property_counts": counts,
+        "additional_match_guidance": [
+            {"code": code, "sks_target": target, "properties": properties}
+            for (code, target), properties in sorted(additional.items()) if properties
+        ],
+    }
+
+
+def build_supplement(labels: dict[str, str], release: Release, table: str, resolved: dict,
+                     guidance: dict[str, list[dict]]) -> dict:
     conflict_note = ""
     if resolved:
         conflict_note = " Conflicting source labels are resolved as follows: " + "; ".join(
@@ -210,17 +305,21 @@ def build_supplement(labels: dict[str, str], release: Release, table: str, resol
     return {
         "resourceType": "CodeSystem", "id": "icpc2E-DK", "url": CANONICAL,
         "version": release.date, "name": "Icpc2DanishTranslations",
-        "title": "ICPC-2 Danish translations (from KiAP)", "status": "active",
+        "title": "ICPC-2 Danish translations and coding guidance (from KiAP)", "status": "active",
         "experimental": False, "date": release.date, "publisher": "HL7 Denmark",
         "contact": [{"name": "HL7 Denmark", "telecom": [
             {"system": "url", "value": "http://www.hl7.dk"},
             {"system": "email", "value": "dk-affiliate@hl7.dk"}]}],
         "description": (
-            f"Danish-language designation supplement for ICPC-2, containing {len(labels)} symptom and diagnosis codes. "
+            f"Danish-language designation and coding-guidance supplement for ICPC-2, containing {len(labels)} symptom and diagnosis codes. "
             "Process codes and Danish-only grouping codes are excluded. "
             f"The authoritative source is KiAP ICPC-2-DK {release.version}, "
             f"[{Path(urllib.parse.urlsplit(release.url).path).name}]({release.url}), "
-            f"table {table}, fields ICPC-kode and ICPC-diagnose. Whitespace is normalized."
+            f"table {table}, fields ICPC-kode and ICPC-diagnose. "
+            "Narrative properties criteria, inclusion, exclusion, consider and note preserve Kriterier, Inkl, Ekskl, "
+            "Overvej and Bemærk from preferred (Udl=1) rows valid on the source release date. "
+            "Additional-match guidance is reported separately by the generator, not promoted to ICPC concept properties. "
+            "Whitespace is normalized; cross-references remain source text, not executable rules."
             + conflict_note + " Codes are checked against international ICPC-2e v7.0. "
             "Generated by scripts/icpc2_da_supplement.py. The version and date identify "
             "the KiAP source file's release date. [KiAP documentation and releases](" + KIAP_PAGE + ")."
@@ -228,7 +327,14 @@ def build_supplement(labels: dict[str, str], release: Release, table: str, resol
         "copyright": COPYRIGHT,
         "jurisdiction": [{"coding": [{"system": "urn:iso:std:iso:3166", "code": "DK", "display": "Denmark"}]}],
         "content": "supplement", "supplements": SYSTEM, "count": len(labels),
-        "concept": [{"code": code, "designation": [{"language": "da", "value": value}]}
+        "property": [
+            {"code": prop, "uri": f"{CANONICAL}#{prop}",
+             "description": f"{description} Danish source field: {field}; active preferred KiAP rows only.",
+             "type": "string"}
+            for field, prop, description in GUIDANCE_FIELDS
+        ],
+        "concept": [{"code": code, "designation": [{"language": "da", "value": value}],
+                     **({"property": guidance[code]} if guidance.get(code) else {})}
                     for code, value in sorted(labels.items())],
     }
 
@@ -287,10 +393,11 @@ def main(argv=None) -> int:
     try:
         release, table, rows, labels, details = load_source(
             args.source_url, args.source_file, args.reference_file, args.cache_dir, args.table)
-        resource = build_supplement(labels, release, table, details["resolved_conflicts"])
+        guidance, guidance_details = select_guidance(rows, labels, release)
+        resource = build_supplement(labels, release, table, details["resolved_conflicts"], guidance)
         changed = write_resource(resource, args.out, args.only_if_changed)
         report = {"source_url": release.url, "source_version": release.version, "source_date": release.date,
-                  "table": table, "concepts": len(labels), "changed": changed, **details}
+                  "table": table, "concepts": len(labels), "changed": changed, **details, **guidance_details}
         if args.report:
             atomic_write(args.report, (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
         if os.environ.get("GITHUB_OUTPUT"):
