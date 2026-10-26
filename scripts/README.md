@@ -221,8 +221,9 @@ Without `--supplement-out`, only the ConceptMap is written. Online runs
 discover and download the latest KiAP database and fetch the international
 ICD-10 CodeSystem from `tx.fhir.org/r4`. The Danish extensions and SKS diagnoses
 are read from the committed `fhir/` snapshots; `--extensions-file` and
-`--sks-file` can override these. The source loader, ICPC code validation and
-reviewed label resolutions are shared with the supplement generator.
+`--sks-file` can override these. The source loader, ICPC code validation, validity
+parser, reviewed label resolutions and coding-guidance extraction are shared
+with the supplement generator.
 
 The KiAP 4.4 snapshot has **2,476 mapping pairs covering all 686 ICPC codes**,
 including W91. Process and grouping codes are outside the symptom/diagnosis
@@ -258,10 +259,54 @@ terminology server. The workflow creates a PR but does not deploy resources.
 ## `icpc2_da_supplement.py`
 
 Builds `fhir/CodeSystem-icpc2E-DK.json` directly from KiAP's ICPC-2-DK Access
-release. The source is the `ICPC-kode` and `ICPC-diagnose` columns of the
-`ICPCKON2-...` mapping table. Repeated ICD-10 mapping rows are deduplicated by ICPC code. This standalone command writes
+release. Danish designations come from the `ICPC-kode` and `ICPC-diagnose`
+columns of the `ICPCKON2-...` mapping table. Repeated ICD-10 mapping rows
+are deduplicated by ICPC code. This standalone command writes
 only the supplement; the ConceptMap command above and the scheduled workflow
 generate both resources together.
+
+The supplement also declares five custom `string` properties in
+`CodeSystem.property`, populated under each `concept.property` using
+`valueString`:
+
+| KiAP column | Property code | Meaning |
+|---|---|---|
+| `Kriterier` | `criteria` | Criteria for assigning the ICPC concept |
+| `Inkl` | `inclusion` | Included terms and conditions |
+| `Ekskl` | `exclusion` | Conditions to code elsewhere and their cross-references |
+| `Overvej` | `consider` | Alternative ICPC concepts to consider |
+| `Bemærk` | `note` | Supplementary coding notes |
+
+Property URIs use the supplement canonical plus a fragment, for example
+`http://hl7.dk/fhir/core/CodeSystem/icpc2E-DK#criteria`.
+These are local property definitions, not standard FHIR properties or extensions.
+The resource's `language: da` applies to the narrative guidance.
+
+Only **preferred (`Udl=1`) rows active on the source release date** supply
+concept properties. This follows KiAP's
+[ICPC-2-DK specification, §8.1.2, printed page 47](https://web.kiap.dk/resources/files/icpc/systemhuse/icpc_2_kravspecifikation.pdf#page=47):
+guidance on the preferred row describes the ICPC concept and also applies to
+its derived ICD-10 choices. Validity uses the same inclusive start and exclusive
+closing date as the ConceptMap.
+
+Empty fields are omitted; repeated nonempty text is deduplicated after whitespace
+normalization. Multiple preferred rows may contribute nonconflicting fields.
+Conflicting nonempty preferred values, missing guidance columns, unknown flags,
+invalid dates, or a missing active preferred row fail before either output is
+written. Property changes, including removal, trigger `--only-if-changed`.
+
+Guidance on **additional-match (`Udl=0`) rows** may describe a specific ICD-10
+choice. It is retained in the generation report's `additional_match_guidance`
+array, with the ICPC code, SKS target and narrative properties; it is not promoted
+to ICPC-wide properties or added to the ConceptMap. For example, the different
+kidney-stage criteria under `U99` must not become general criteria for `U99`.
+The KiAP 4.4 snapshot has guidance on 655 of 686 ICPC concepts and 11
+additional-match rows reported separately. The report also includes
+`guidance_concepts` and `guidance_property_counts`.
+
+Cross-references and criteria remain Danish source text. They are not parsed
+into executable conditions, `dependsOn`, or `disjoint` relationships. In
+particular, inclusion text is not automatically treated as a synonym designation.
 
 ### Run locally
 

@@ -25,10 +25,6 @@ ICD10_SYSTEM = "http://hl7.org/fhir/sid/icd-10"
 EXTENSIONS_SYSTEM = "http://hl7.dk/fhir/core/CodeSystem/icd10-danish-extensions"
 SKS_SYSTEM = "urn:oid:1.2.208.176.2.4.12"
 CANONICAL = "http://hl7.dk/fhir/core/ConceptMap/icpc2-icd10"
-OPEN_END = dt.date(2500, 1, 1)
-# KiAP 4.4 has a missing digit in the middle (last-modified) date for this row.
-# The valid-from and closing dates are intact. Do not invent a modified date.
-KNOWN_HISTORY_TYPO = ("A01", "DR521", "20240701206010125000101")
 
 
 def concepts(resource: dict):
@@ -76,22 +72,6 @@ class Targets:
         raise ValueError(f"Unresolved KiAP target {sks_code}; update/review target CodeSystems before publishing")
 
 
-def validity(code: str, target: str, history: str) -> tuple[dt.date, dt.date, bool]:
-    """KiAP forward table stores creation, last change, closure (YYYYMMDD each)."""
-    known_typo = (code, target, history) == KNOWN_HISTORY_TYPO
-    if not re.fullmatch(r"\d{24}", history) and not known_typo:
-        raise ValueError(f"Invalid KiAP history for {code}/{target}: {history!r}")
-    start = dt.datetime.strptime(history[:8], "%Y%m%d").date()
-    end = dt.datetime.strptime(history[-8:], "%Y%m%d").date()
-    if not known_typo:
-        changed = dt.datetime.strptime(history[8:16], "%Y%m%d").date()
-        if changed < start:
-            raise ValueError(f"Last-change date precedes creation for {code}/{target}")
-    if end < start:
-        raise ValueError(f"Closing date precedes creation for {code}/{target}")
-    return start, end, known_typo
-
-
 def build_conceptmap(rows: list[dict], labels: dict[str, str], release: kiap.Release,
                      table: str, targets: Targets) -> tuple[dict, dict]:
     as_of = dt.date.fromisoformat(release.date)
@@ -114,7 +94,7 @@ def build_conceptmap(rows: list[dict], labels: dict[str, str], release: kiap.Rel
         if flag not in {"0", "1"}:
             raise ValueError(f"Unknown preferred-match flag for {code}/{raw_target}: {flag!r}")
         history = (row.get("Gyldig fra dato") or "").strip()
-        start, end, typo = validity(code, raw_target, history)
+        start, end, typo = kiap.validity(code, raw_target, history)
         if typo:
             warnings.append(f"{code}/{raw_target}: malformed last-change date in {history}; intact validity endpoints used")
         if not start <= as_of < end:
@@ -126,7 +106,7 @@ def build_conceptmap(rows: list[dict], labels: dict[str, str], release: kiap.Rel
             raise ValueError(f"Empty KiAP target label for {code}/{raw_target}")
         comment = "KiAP Udl=" + flag + (": preferred ICD-10 match." if flag == "1" else ": additional ICD-10 match.")
         comment += f" SKS source code: {raw_target}. Valid from {start.isoformat()}."
-        if end != OPEN_END:
+        if end != kiap.OPEN_END:
             comment += f" Closing date: {end.isoformat()}."
         target = {"code": target_code, "equivalence": "relatedto", "comment": comment}
         if display:
@@ -216,7 +196,8 @@ def main(argv=None) -> int:
                           json.loads(args.sks_file.read_text(encoding="utf-8")))
         resource, stats = build_conceptmap(rows, labels, release, table, targets)
         # Validate both artifacts before changing either published file.
-        supplement = kiap.build_supplement(labels, release, table, details["resolved_conflicts"])
+        guidance, guidance_details = kiap.select_guidance(rows, labels, release)
+        supplement = kiap.build_supplement(labels, release, table, details["resolved_conflicts"], guidance)
         map_changed = kiap.write_resource(resource, args.out, args.only_if_changed)
         supplement_changed = False
         if args.supplement_out:
@@ -224,7 +205,7 @@ def main(argv=None) -> int:
         report = {"source_url": release.url, "source_version": release.version, "source_date": release.date,
                   "table": table, "concepts": len(labels), "conceptmap_changed": map_changed,
                   "supplement_changed": supplement_changed, "changed": map_changed or supplement_changed,
-                  **details, **stats}
+                  **details, **stats, **guidance_details}
         if args.report:
             kiap.atomic_write(args.report, (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
         if os.environ.get("GITHUB_OUTPUT"):

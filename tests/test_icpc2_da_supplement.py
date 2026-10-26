@@ -21,6 +21,12 @@ def row(code, label):
     return {"ICPC-kode": code, "ICPC-diagnose": label}
 
 
+def guidance_row(code="A01", target="DR529", flag="1", **fields):
+    return {**row(code, "Almen smerte"), "ICD10-kode": target, "Udl": flag,
+            "Gyldig fra dato": "200801012026050125000101",
+            **{field: "" for field, _, _ in icpc.GUIDANCE_FIELDS}, **fields}
+
+
 class DiscoveryTests(unittest.TestCase):
     def test_finds_latest_numeric_version_not_first_link(self):
         html = '<a href="' + URL + '">current</a>'
@@ -105,7 +111,7 @@ class ReaderTests(unittest.TestCase):
 
 class PublicationTests(unittest.TestCase):
     def resource(self):
-        return icpc.build_supplement({"A01": "Almen smerte"}, icpc.parse_release(URL), "ICPCKON2-v4", {})
+        return icpc.build_supplement({"A01": "Almen smerte"}, icpc.parse_release(URL), "ICPCKON2-v4", {}, {})
 
     def test_regeneration_is_deterministic(self):
         self.assertEqual(self.resource(), self.resource())
@@ -126,6 +132,37 @@ class PublicationTests(unittest.TestCase):
             self.assertTrue(icpc.write_resource(revised, out, True))
             self.assertEqual(json.loads(out.read_text()), revised)
 
+    def test_guidance_only_changes_and_removal_trigger_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "cs.json"
+            resource = self.resource()
+            icpc.write_resource(resource, out, True)
+            resource["concept"][0]["property"] = [{"code": "note", "valueString": "Dansk note"}]
+            self.assertTrue(icpc.write_resource(resource, out, True))
+            resource["concept"][0]["property"][0]["valueString"] = "Ændret note"
+            self.assertTrue(icpc.write_resource(resource, out, True))
+            del resource["concept"][0]["property"]
+            self.assertTrue(icpc.write_resource(resource, out, True))
+
+    @patch.object(icpc, "read_rows")
+    @patch.object(icpc, "reference_codes", return_value={"A01"})
+    def test_standalone_exports_guidance_and_preserves_output_on_conflict(self, _, read_rows):
+        rows = [guidance_row(Kriterier="Danske kriterier", **{"Bemærk": "En note"})]
+        read_rows.return_value = ("ICPCKON2-v4", rows)
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "cs.json"
+            args = ["--source-url", URL, "--source-file", "local.accdb",
+                    "--reference-file", "local.zip", "--out", str(out)]
+            self.assertEqual(icpc.main(args), 0)
+            resource = json.loads(out.read_text())
+            self.assertEqual(resource["concept"][0]["property"], [
+                {"code": "criteria", "valueString": "Danske kriterier"},
+                {"code": "note", "valueString": "En note"}])
+            before = out.read_bytes()
+            rows.append(guidance_row(target="DR520", Kriterier="Modstridende kriterier"))
+            self.assertEqual(icpc.main(args), 1)
+            self.assertEqual(out.read_bytes(), before)
+
     @patch.object(icpc, "read_rows", return_value=("ICPCKON2-v4", [row("A01", "One"), row("A01", "Two")]))
     @patch.object(icpc, "reference_codes", return_value={"A01"})
     def test_failed_generation_does_not_overwrite_published_file(self, *_):
@@ -135,6 +172,74 @@ class PublicationTests(unittest.TestCase):
             result = icpc.main(["--source-url", URL, "--source-file", "local.accdb", "--reference-file", "local.zip", "--out", str(out)])
             self.assertEqual(result, 1)
             self.assertEqual(out.read_text(), "original")
+
+
+class GuidanceTests(unittest.TestCase):
+    def select(self, rows, labels=None):
+        return icpc.select_guidance(rows, labels or {"A01": "Almen smerte"}, icpc.parse_release(URL))
+
+    def test_all_fields_are_typed_properties_and_empty_values_are_omitted(self):
+        rows = [guidance_row(Kriterier="  Dansk\n kriterium ", Inkl="Inklusion",
+                             Ekskl="Anden tilstand A02", Overvej="A03",
+                             **{"Bemærk": "Dobbeltkod A04"}),
+                guidance_row(code="A02")]
+        labels = {"A01": "Almen smerte", "A02": "Andet"}
+        guidance, report = self.select(rows, labels)
+        resource = icpc.build_supplement(labels, icpc.parse_release(URL), "ICPCKON2-v4", {}, guidance)
+        self.assertEqual(report["guidance_concepts"], 1)
+        self.assertEqual(report["guidance_property_counts"], {
+            "criteria": 1, "inclusion": 1, "exclusion": 1, "consider": 1, "note": 1})
+        self.assertEqual(guidance["A01"][0], {"code": "criteria", "valueString": "Dansk kriterium"})
+        self.assertNotIn("property", resource["concept"][1])
+        for definition, value in zip(resource["property"], guidance["A01"]):
+            self.assertEqual(definition["type"], "string")
+            self.assertEqual(definition["code"], value["code"])
+            self.assertEqual(definition["uri"], icpc.CANONICAL + "#" + value["code"])
+
+    def test_additional_guidance_is_reported_without_becoming_concept_properties(self):
+        rows = [guidance_row(Inkl="Generel inklusion"),
+                guidance_row(target="DR521", flag="0", Kriterier="Specifikt kriterium", Inkl="Specifik inklusion")]
+        guidance, report = self.select(rows)
+        self.assertEqual(guidance["A01"], [{"code": "inclusion", "valueString": "Generel inklusion"}])
+        self.assertEqual(report["additional_match_guidance"], [{
+            "code": "A01", "sks_target": "DR521", "properties": [
+                {"code": "criteria", "valueString": "Specifikt kriterium"},
+                {"code": "inclusion", "valueString": "Specifik inklusion"}]}])
+        self.assertEqual(self.select(rows), self.select(list(reversed(rows)) + [rows[0], rows[1]]))
+
+    def test_preferred_duplicates_and_blank_rows_merge_but_conflicts_fail(self):
+        rows = [guidance_row(Kriterier="Samme tekst"), guidance_row(target="DR520"),
+                guidance_row(target="DR521", Kriterier="Samme  tekst")]
+        self.assertEqual(self.select(rows)[0]["A01"], [{"code": "criteria", "valueString": "Samme tekst"}])
+        rows[-1]["Kriterier"] = "Anden tekst"
+        with self.assertRaisesRegex(ValueError, "Conflicting preferred guidance"):
+            self.select(rows)
+
+    def test_validity_boundaries_do_not_merge_old_or_future_guidance(self):
+        rows = [guidance_row(Kriterier="Aktuel", **{"Gyldig fra dato": "202606292026062925000101"}),
+                guidance_row(Kriterier="Gammel", **{"Gyldig fra dato": "200801012026050120260629"}),
+                guidance_row(Kriterier="Fremtidig", **{"Gyldig fra dato": "202606302026063025000101"}),
+                guidance_row(flag="0", Kriterier="Udløbet", **{"Gyldig fra dato": "200801012026050120260629"})]
+        guidance, report = self.select(rows)
+        self.assertEqual(guidance["A01"], [{"code": "criteria", "valueString": "Aktuel"}])
+        self.assertEqual(report["additional_match_guidance"], [])
+        with self.assertRaisesRegex(ValueError, "No active preferred row"):
+            self.select(rows[1:])
+
+    def test_missing_schema_unknown_flags_and_invalid_dates_fail(self):
+        missing = guidance_row()
+        del missing["Bemærk"]
+        for rows in ([], [missing], [guidance_row(flag="2")],
+                     [guidance_row(**{"Gyldig fra dato": "bad"})]):
+            with self.subTest(rows=rows), self.assertRaises(ValueError):
+                self.select(rows)
+
+    def test_known_history_typo_remains_supported_and_out_of_scope_rows_are_skipped(self):
+        rows = [guidance_row(), guidance_row(target="DR521", flag="0", Kriterier="Specifikt",
+                **{"Gyldig fra dato": icpc.KNOWN_HISTORY_TYPO[2]}), row("A00", "Kapitel"), {}]
+        guidance, report = self.select(rows)
+        self.assertEqual(guidance, {})
+        self.assertEqual(len(report["additional_match_guidance"]), 1)
 
 
 if __name__ == "__main__":

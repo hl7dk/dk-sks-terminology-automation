@@ -42,7 +42,7 @@ system.** Use the publishing destinations below when reviewing an update.
 | `CodeSystem-sks-diagnoses.json` | The legacy SKS diagnosis register (the "D-hierarchy", Danish ICD-10 with `D`-prefixed codes). `content: complete` under `urn:oid:1.2.208.176.2.4.12`. Keeps the 3.7.0-style SKS diagnosis codings resolvable alongside the ICD-10-based model. | Nordic terminology server |
 | `CodeSystem-icd10-danish-extensions.json` | Danish diagnosis codes that are not plain ICD-10 (extensions + Danish-only blocks). | Nordic terminology server |
 | `CodeSystem-icd10-da.json` | A **supplement** adding Danish `da` designations to the international ICD-10 codes Denmark reuses. | `FHIR/packages`: `packages/fhir.tx.support/package/` |
-| `CodeSystem-icpc2E-DK.json` | A **supplement** adding KiAP Danish symptom/diagnosis labels to international ICPC-2. | `FHIR/packages`: `packages/fhir.tx.support/package/` |
+| `CodeSystem-icpc2E-DK.json` | A **supplement** adding KiAP Danish symptom/diagnosis labels and narrative coding-guidance properties to international ICPC-2. | `FHIR/packages`: `packages/fhir.tx.support/package/` |
 | `ConceptMap-icpc2-icd10.json` | ICPC-2 → ICD-10 mapping from KiAP's forward conversion table, with international and Danish-extension targets under their respective systems. | Nordic terminology server |
 
 By default, SKS-derived resources use the `SKScomplete.txt` `Last-Modified`
