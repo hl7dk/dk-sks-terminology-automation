@@ -5,11 +5,11 @@ import json
 import sys
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/icpc2_da_supplement.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("icpc", SCRIPT)
 icpc = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = icpc
@@ -19,6 +19,15 @@ URL = "https://web.kiap.dk/resources/files/icpc/systemhuse/ICPC_v4_4_20260629.ac
 
 def row(code, label):
     return {"ICPC-kode": code, "ICPC-diagnose": label}
+
+
+def base(codes=("A01",)):
+    """Base ICPC-2 CodeSystem shaped like tx.fhir.org: chapters nest their codes."""
+    def concept(code, kind):
+        return {"code": code, "property": [{"code": "kind", "valueCode": kind}]}
+    return {"resourceType": "CodeSystem", "url": icpc.SYSTEM, "version": "7.0", "content": "complete",
+            "concept": [{**concept("-", "chapter"), "concept": [concept("-30", "process")]},
+                        {**concept("A", "chapter"), "concept": [concept(code, "symptom") for code in codes]}]}
 
 
 def guidance_row(code="A01", target="DR529", flag="1", **fields):
@@ -101,22 +110,37 @@ class ReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "lacks required columns"):
             icpc.read_rows(Path("source.accdb"))
 
-    def test_international_reference_excludes_chapters_and_process_codes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            archive = Path(directory) / "base.zip"
-            with zipfile.ZipFile(archive, "w") as z:
-                z.writestr("reference.xml", '<ClaML><Class code="A"/><Class code="A01"/><Class code="A30"/><Class code="-30"/><Class code="V00"/></ClaML>')
-            self.assertEqual(icpc.reference_codes(archive), {"A01"})
+    def test_base_codesystem_excludes_chapters_and_process_codes(self):
+        self.assertEqual(icpc.reference_codes(base(("A01", "A02"))), ({"A01", "A02"}, "7.0"))
+
+    def test_unusable_base_codesystem_fails(self):
+        cases = [{"url": "http://example.org/other"}, {"version": ""}, {"content": "fragment"},
+                 {"concept": [{"code": "A01"}]}, {"concept": base()["concept"][:1]},
+                 {"concept": [{"code": "A00", "property": [{"code": "kind", "valueCode": "symptom"}]}]}]
+        for change in cases:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                icpc.reference_codes({**base(), **change})
+
+    def test_local_base_file_is_used_without_network(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(icpc, "fetch_icd10_codesystem") as fetch:
+            path = Path(directory) / "icpc-2.json"
+            path.write_text(json.dumps(base()))
+            self.assertEqual(icpc.load_base(path, Path(directory)), base())
+            fetch.assert_not_called()
+            fetch.side_effect = SystemExit("not found")
+            with self.assertRaisesRegex(ValueError, "not found"):
+                icpc.load_base(None, Path(directory))
 
 
 class PublicationTests(unittest.TestCase):
     def resource(self):
-        return icpc.build_supplement({"A01": "Almen smerte"}, icpc.parse_release(URL), "ICPCKON2-v4", {}, {})
+        return icpc.build_supplement({"A01": "Almen smerte"}, icpc.parse_release(URL), "ICPCKON2-v4", {}, {}, "7.0")
 
     def test_regeneration_is_deterministic(self):
         self.assertEqual(self.resource(), self.resource())
         self.assertEqual(self.resource()["date"], "2026-06-29")
-        self.assertEqual(self.resource()["version"], "2026-06-29")
+        self.assertEqual(self.resource()["version"], "4.4.20260629")
+        self.assertEqual(self.resource()["supplements"], icpc.SYSTEM + "|7.0")
 
     def test_no_change_keeps_published_bytes_but_real_label_change_writes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -137,7 +161,7 @@ class PublicationTests(unittest.TestCase):
             out = Path(directory) / "cs.json"
             resource = self.resource()
             icpc.write_resource(resource, out, True)
-            resource["concept"][0]["property"] = [{"code": "note", "valueString": "Dansk note"}]
+            resource["concept"][0]["property"] = [{"code": "note-da", "valueString": "Dansk note"}]
             self.assertTrue(icpc.write_resource(resource, out, True))
             resource["concept"][0]["property"][0]["valueString"] = "Ændret note"
             self.assertTrue(icpc.write_resource(resource, out, True))
@@ -145,31 +169,31 @@ class PublicationTests(unittest.TestCase):
             self.assertTrue(icpc.write_resource(resource, out, True))
 
     @patch.object(icpc, "read_rows")
-    @patch.object(icpc, "reference_codes", return_value={"A01"})
+    @patch.object(icpc, "load_base", return_value=base())
     def test_standalone_exports_guidance_and_preserves_output_on_conflict(self, _, read_rows):
         rows = [guidance_row(Kriterier="Danske kriterier", **{"Bemærk": "En note"})]
         read_rows.return_value = ("ICPCKON2-v4", rows)
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory) / "cs.json"
             args = ["--source-url", URL, "--source-file", "local.accdb",
-                    "--reference-file", "local.zip", "--out", str(out)]
+                    "--reference-file", "icpc-2.json", "--out", str(out)]
             self.assertEqual(icpc.main(args), 0)
             resource = json.loads(out.read_text())
             self.assertEqual(resource["concept"][0]["property"], [
-                {"code": "criteria", "valueString": "Danske kriterier"},
-                {"code": "note", "valueString": "En note"}])
+                {"code": "criteria-da", "valueString": "Danske kriterier"},
+                {"code": "note-da", "valueString": "En note"}])
             before = out.read_bytes()
             rows.append(guidance_row(target="DR520", Kriterier="Modstridende kriterier"))
             self.assertEqual(icpc.main(args), 1)
             self.assertEqual(out.read_bytes(), before)
 
     @patch.object(icpc, "read_rows", return_value=("ICPCKON2-v4", [row("A01", "One"), row("A01", "Two")]))
-    @patch.object(icpc, "reference_codes", return_value={"A01"})
+    @patch.object(icpc, "load_base", return_value=base())
     def test_failed_generation_does_not_overwrite_published_file(self, *_):
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory) / "cs.json"
             out.write_text("original")
-            result = icpc.main(["--source-url", URL, "--source-file", "local.accdb", "--reference-file", "local.zip", "--out", str(out)])
+            result = icpc.main(["--source-url", URL, "--source-file", "local.accdb", "--reference-file", "icpc-2.json", "--out", str(out)])
             self.assertEqual(result, 1)
             self.assertEqual(out.read_text(), "original")
 
@@ -185,11 +209,11 @@ class GuidanceTests(unittest.TestCase):
                 guidance_row(code="A02")]
         labels = {"A01": "Almen smerte", "A02": "Andet"}
         guidance, report = self.select(rows, labels)
-        resource = icpc.build_supplement(labels, icpc.parse_release(URL), "ICPCKON2-v4", {}, guidance)
+        resource = icpc.build_supplement(labels, icpc.parse_release(URL), "ICPCKON2-v4", {}, guidance, "7.0")
         self.assertEqual(report["guidance_concepts"], 1)
         self.assertEqual(report["guidance_property_counts"], {
-            "criteria": 1, "inclusion": 1, "exclusion": 1, "consider": 1, "note": 1})
-        self.assertEqual(guidance["A01"][0], {"code": "criteria", "valueString": "Dansk kriterium"})
+            "criteria-da": 1, "inclusion-da": 1, "exclusion-da": 1, "consider-da": 1, "note-da": 1})
+        self.assertEqual(guidance["A01"][0], {"code": "criteria-da", "valueString": "Dansk kriterium"})
         self.assertNotIn("property", resource["concept"][1])
         for definition, value in zip(resource["property"], guidance["A01"]):
             self.assertEqual(definition["type"], "string")
@@ -200,17 +224,17 @@ class GuidanceTests(unittest.TestCase):
         rows = [guidance_row(Inkl="Generel inklusion"),
                 guidance_row(target="DR521", flag="0", Kriterier="Specifikt kriterium", Inkl="Specifik inklusion")]
         guidance, report = self.select(rows)
-        self.assertEqual(guidance["A01"], [{"code": "inclusion", "valueString": "Generel inklusion"}])
+        self.assertEqual(guidance["A01"], [{"code": "inclusion-da", "valueString": "Generel inklusion"}])
         self.assertEqual(report["additional_match_guidance"], [{
             "code": "A01", "sks_target": "DR521", "properties": [
-                {"code": "criteria", "valueString": "Specifikt kriterium"},
-                {"code": "inclusion", "valueString": "Specifik inklusion"}]}])
+                {"code": "criteria-da", "valueString": "Specifikt kriterium"},
+                {"code": "inclusion-da", "valueString": "Specifik inklusion"}]}])
         self.assertEqual(self.select(rows), self.select(list(reversed(rows)) + [rows[0], rows[1]]))
 
     def test_preferred_duplicates_and_blank_rows_merge_but_conflicts_fail(self):
         rows = [guidance_row(Kriterier="Samme tekst"), guidance_row(target="DR520"),
                 guidance_row(target="DR521", Kriterier="Samme  tekst")]
-        self.assertEqual(self.select(rows)[0]["A01"], [{"code": "criteria", "valueString": "Samme tekst"}])
+        self.assertEqual(self.select(rows)[0]["A01"], [{"code": "criteria-da", "valueString": "Samme tekst"}])
         rows[-1]["Kriterier"] = "Anden tekst"
         with self.assertRaisesRegex(ValueError, "Conflicting preferred guidance"):
             self.select(rows)
@@ -221,7 +245,7 @@ class GuidanceTests(unittest.TestCase):
                 guidance_row(Kriterier="Fremtidig", **{"Gyldig fra dato": "202606302026063025000101"}),
                 guidance_row(flag="0", Kriterier="Udløbet", **{"Gyldig fra dato": "200801012026050120260629"})]
         guidance, report = self.select(rows)
-        self.assertEqual(guidance["A01"], [{"code": "criteria", "valueString": "Aktuel"}])
+        self.assertEqual(guidance["A01"], [{"code": "criteria-da", "valueString": "Aktuel"}])
         self.assertEqual(report["additional_match_guidance"], [])
         with self.assertRaisesRegex(ValueError, "No active preferred row"):
             self.select(rows[1:])

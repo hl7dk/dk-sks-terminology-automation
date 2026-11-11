@@ -223,7 +223,7 @@ def revision_date(dest: str) -> str:
 
 def fetch_icd10_codesystem(tx_base: str, system: str, dest: str,
                            force: bool = False) -> dict:
-    """Resolve the ICD-10 CodeSystem by canonical url and cache the full JSON."""
+    """Resolve a CodeSystem (ICD-10, or the ICPC-2 base) by canonical url and cache the full JSON."""
     if os.path.exists(dest) and not force:
         print(f"  cached: {dest} ({os.path.getsize(dest):,} bytes)")
         with open(dest, "r", encoding="utf-8") as fh:
@@ -235,7 +235,7 @@ def fetch_icd10_codesystem(tx_base: str, system: str, dest: str,
     print(f"  resolving CodeSystem {system}")
     bundle = json.loads(_http_get(search, accept="application/fhir+json"))
     if not bundle.get("entry"):
-        raise SystemExit(f"ICD-10 CodeSystem '{system}' not found on {tx_base}")
+        raise SystemExit(f"CodeSystem '{system}' not found on {tx_base}")
     res = bundle["entry"][0]["resource"]
     cs_id = res["id"]
     version = res.get("version", "?")

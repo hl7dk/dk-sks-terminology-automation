@@ -2,8 +2,9 @@
 """Generate the Danish ICPC-2 supplement from KiAP's Access database.
 
 Python standard library plus the mdbtools commands mdb-tables/mdb-export.
-Source downloads are refreshed on every run; the pinned international reference
-is cached. No Access queries or macros are executed.
+Source downloads are refreshed on every run, including the base ICPC-2
+CodeSystem from tx.fhir.org that the supplement is validated against and pinned
+to. No Access queries or macros are executed.
 """
 from __future__ import annotations
 
@@ -19,22 +20,19 @@ import sys
 import tempfile
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
-import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
+from sks_icd10_diff import fetch_icd10_codesystem
+
 KIAP_PAGE = "https://www.kiap.dk/praksis/icpc-2"
 SYSTEM = "http://hl7.org/fhir/sid/icpc-2"
 CANONICAL = "http://hl7.dk/fhir/core/CodeSystem/icpc2E-DK"
-REFERENCE_URL = (
-    "https://www.helsedirektoratet.no/digitalisering-og-e-helse/"
-    "helsefaglige-kodeverk/icpc/icpc-2e--english-version/_/attachment/inline/"
-    "7c5c8e7f-8c5a-4a0d-97a7-49bb144a162c%3A"
-    "22fb4d59b1033d44af1da42cb84897cb363f7136/ICPC-2e-v7.0.zip"
-)
+TX_BASE = "https://tx.fhir.org/r4"
+# Base concept kinds outside this supplement's symptom/diagnosis scope.
+OUT_OF_SCOPE_KINDS = {"chapter", "process"}
 USER_AGENT = "dk-sks-terminology-automation/1.0 (+https://github.com/hl7dk/dk-sks-terminology-automation)"
 RELEASE_RE = re.compile(r"ICPC[_-]v(\d+(?:[_.]\d+)*)[_-](\d{8})\.accdb", re.I)
 CODE_RE = re.compile(r"[ABDFHKLNPRSTUWXYZ](?:0[1-9]|[12]\d|[789]\d)")
@@ -42,12 +40,14 @@ OPEN_END = dt.date(2500, 1, 1)
 # Reviewed KiAP 4.4 typo in the middle (last-modified) date; endpoints are intact.
 KNOWN_HISTORY_TYPO = ("A01", "DR521", "20240701206010125000101")
 # Local property URIs identify these Danish narrative fields, not executable rules.
+# The base ICPC-2 CodeSystem already defines criteria/inclusion/exclusion/consider/
+# note with English text; the -da suffix keeps the Danish values distinguishable.
 GUIDANCE_FIELDS = (
-    ("Kriterier", "criteria", "Criteria for assigning the ICPC concept."),
-    ("Inkl", "inclusion", "Terms and conditions included under the ICPC concept."),
-    ("Ekskl", "exclusion", "Conditions to code elsewhere, including source cross-references."),
-    ("Overvej", "consider", "Alternative ICPC concepts to consider."),
-    ("Bemærk", "note", "Supplementary coding notes for the ICPC concept."),
+    ("Kriterier", "criteria-da", "Criteria for assigning the ICPC concept."),
+    ("Inkl", "inclusion-da", "Terms and conditions included under the ICPC concept."),
+    ("Ekskl", "exclusion-da", "Conditions to code elsewhere, including source cross-references."),
+    ("Overvej", "consider-da", "Alternative ICPC concepts to consider."),
+    ("Bemærk", "note-da", "Supplementary coding notes for the ICPC concept."),
 )
 # Reviewed against KiAP 4.4 and international ICPC-2e v7.0. Only these exact
 # conflicting sets are accepted. A new label, even on these codes, needs review.
@@ -73,6 +73,11 @@ class Release:
     url: str
     version: str
     date: str
+
+    @property
+    def fhir_version(self) -> str:
+        """KiAP business version plus the filename's release date, e.g. 4.4.20260629."""
+        return f"{self.version}.{self.date.replace('-', '')}"
 
 
 def parse_release(url: str) -> Release:
@@ -164,16 +169,41 @@ def read_rows(database: Path, table: str | None = None) -> tuple[str, list[dict]
     return table, list(reader)
 
 
-def reference_codes(archive: Path) -> set[str]:
-    with zipfile.ZipFile(archive) as source:
-        xml_files = [name for name in source.namelist() if name.lower().endswith(".xml")]
-        if len(xml_files) != 1:
-            raise ValueError("Expected one ClaML document in the international reference archive")
-        root = ET.fromstring(source.read(xml_files[0]).decode("utf-8-sig").lstrip())
-    codes = {c.attrib["code"] for c in root.findall("Class") if CODE_RE.fullmatch(c.attrib.get("code", ""))}
+def concepts(resource: dict):
+    for concept in resource.get("concept", []):
+        yield concept
+        yield from concepts(concept)
+
+
+def reference_codes(base: dict) -> tuple[set[str], str]:
+    """Symptom/diagnosis codes and version of the base ICPC-2 CodeSystem."""
+    if base.get("resourceType") != "CodeSystem" or base.get("url") != SYSTEM:
+        raise ValueError(f"Expected the base CodeSystem {SYSTEM}")
+    if base.get("content") != "complete" or not base.get("version"):
+        raise ValueError("Base ICPC-2 CodeSystem must be complete and state its version")
+    codes = set()
+    for concept in concepts(base):
+        kinds = {p.get("valueCode") for p in concept.get("property", []) if p.get("code") == "kind"}
+        if len(kinds) != 1:
+            raise ValueError(f"Base ICPC-2 concept {concept.get('code')!r} must have exactly one kind")
+        if kinds & OUT_OF_SCOPE_KINDS:
+            continue
+        if not CODE_RE.fullmatch(concept["code"]):
+            raise ValueError(f"Unexpected symptom/diagnosis code {concept['code']!r} in base ICPC-2; review before publishing")
+        codes.add(concept["code"])
     if not codes:
-        raise ValueError("No ICPC symptom/diagnosis codes in international reference")
-    return codes
+        raise ValueError("No ICPC symptom/diagnosis codes in the base CodeSystem")
+    return codes, base["version"]
+
+
+def load_base(reference_file: Path | None, cache_dir: Path) -> dict:
+    if reference_file:
+        return json.loads(reference_file.read_text(encoding="utf-8"))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        return fetch_icd10_codesystem(TX_BASE, SYSTEM, str(cache_dir / "icpc-2.json"), force=True)
+    except SystemExit as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def select_labels(rows: list[dict], base_codes: set[str]) -> tuple[dict[str, str], dict]:
@@ -195,7 +225,7 @@ def select_labels(rows: list[dict], base_codes: set[str]) -> tuple[dict[str, str
             excluded.add(code)
             continue
         if code not in base_codes:
-            raise ValueError(f"KiAP code {code!r} is absent from the international reference; review before publishing")
+            raise ValueError(f"KiAP code {code!r} is absent from the base ICPC-2 CodeSystem; review before publishing")
         labels[code].add(value)
     missing = base_codes - labels.keys()
     if missing:
@@ -297,15 +327,16 @@ def select_guidance(rows: list[dict], labels: dict[str, str], release: Release) 
 
 
 def build_supplement(labels: dict[str, str], release: Release, table: str, resolved: dict,
-                     guidance: dict[str, list[dict]]) -> dict:
+                     guidance: dict[str, list[dict]], base_version: str) -> dict:
     conflict_note = ""
     if resolved:
         conflict_note = " Conflicting source labels are resolved as follows: " + "; ".join(
             f"{code}: {value}" for code, value in sorted(resolved.items())) + "."
     return {
         "resourceType": "CodeSystem", "id": "icpc2E-DK", "url": CANONICAL,
-        "version": release.date, "name": "Icpc2DanishTranslations",
-        "title": "ICPC-2 Danish translations and coding guidance (from KiAP)", "status": "active",
+        "version": release.fhir_version, "name": "Icpc2DanishTranslations",
+        "title": ("International Classification of Primary Care, second edition (1998), "
+                  "Danish translations and coding guidance (from KiAP)"), "status": "active",
         "experimental": False, "date": release.date, "publisher": "HL7 Denmark",
         "contact": [{"name": "HL7 Denmark", "telecom": [
             {"system": "url", "value": "http://www.hl7.dk"},
@@ -316,17 +347,19 @@ def build_supplement(labels: dict[str, str], release: Release, table: str, resol
             f"The authoritative source is KiAP ICPC-2-DK {release.version}, "
             f"[{Path(urllib.parse.urlsplit(release.url).path).name}]({release.url}), "
             f"table {table}, fields ICPC-kode and ICPC-diagnose. "
-            "Narrative properties criteria, inclusion, exclusion, consider and note preserve Kriterier, Inkl, Ekskl, "
-            "Overvej and Bemærk from preferred (Udl=1) rows valid on the source release date. "
+            "Narrative properties " + ", ".join(prop for _, prop, _ in GUIDANCE_FIELDS)
+            + " preserve Kriterier, Inkl, Ekskl, Overvej and Bemærk from preferred (Udl=1) rows valid on the "
+            "source release date; the -da suffix distinguishes them from the English properties of the base system. "
             "Additional-match guidance is reported separately by the generator, not promoted to ICPC concept properties. "
             "Whitespace is normalized; cross-references remain source text, not executable rules."
-            + conflict_note + " Codes are checked against international ICPC-2e v7.0. "
-            "Generated by scripts/icpc2_da_supplement.py. The version and date identify "
-            "the KiAP source file's release date. [KiAP documentation and releases](" + KIAP_PAGE + ")."
+            + conflict_note + f" Codes are checked against the base ICPC-2 CodeSystem, version {base_version}. "
+            "Generated by scripts/icpc2_da_supplement.py. The version combines the KiAP release version "
+            "with the source file's release date, which is also the resource date. "
+            "[KiAP documentation and releases](" + KIAP_PAGE + ")."
         ),
         "copyright": COPYRIGHT,
         "jurisdiction": [{"coding": [{"system": "urn:iso:std:iso:3166", "code": "DK", "display": "Denmark"}]}],
-        "content": "supplement", "supplements": SYSTEM, "count": len(labels),
+        "content": "supplement", "supplements": f"{SYSTEM}|{base_version}", "count": len(labels),
         "property": [
             {"code": prop, "uri": f"{CANONICAL}#{prop}",
              "description": f"{description} Danish source field: {field}; active preferred KiAP rows only.",
@@ -359,8 +392,8 @@ def write_resource(resource: dict, output: Path, only_if_changed: bool) -> bool:
 
 def load_source(source_url: str | None, source_file: Path | None,
                 reference_file: Path | None, cache_dir: Path,
-                table: str | None = None) -> tuple[Release, str, list[dict], dict, dict]:
-    """Acquire and validate one KiAP snapshot, shared by both generators."""
+                table: str | None = None) -> tuple[Release, str, list[dict], dict, dict, dict]:
+    """Acquire and validate one KiAP snapshot and the base CodeSystem, shared by both generators."""
     if source_file and not source_url:
         raise ValueError("--source-file requires --source-url")
     release = parse_release(source_url) if source_url else discover_release(fetch(KIAP_PAGE).decode("utf-8"))
@@ -369,12 +402,11 @@ def load_source(source_url: str | None, source_file: Path | None,
     else:
         database = cache_dir / Path(urllib.parse.urlsplit(release.url).path).name
         atomic_write(database, fetch(release.url))
-    reference = reference_file or cache_dir / "ICPC-2e-v7.0.zip"
-    if not reference.exists() and not reference_file:
-        atomic_write(reference, fetch(REFERENCE_URL))
+    base = load_base(reference_file, cache_dir)
+    base_codes, base_version = reference_codes(base)
     table, rows = read_rows(database, table)
-    labels, details = select_labels(rows, reference_codes(reference))
-    return release, table, rows, labels, details
+    labels, details = select_labels(rows, base_codes)
+    return release, table, rows, labels, {**details, "base_version": base_version}, base
 
 
 def main(argv=None) -> int:
@@ -382,7 +414,7 @@ def main(argv=None) -> int:
     parser.add_argument("--source-url", help="Specific dated KiAP .accdb URL; otherwise discover latest")
     parser.add_argument("--source-file", type=Path, help="Local .accdb, requires --source-url for provenance")
     parser.add_argument("--table", help="Override table selection if KiAP changes its schema")
-    parser.add_argument("--reference-file", type=Path, help="Local international ICPC-2e v7.0 ZIP (offline)")
+    parser.add_argument("--reference-file", type=Path, help="Local base ICPC-2 CodeSystem JSON (offline); otherwise download from tx.fhir.org")
     parser.add_argument("--cache-dir", type=Path, default=Path(".icpc-kiap-cache"))
     parser.add_argument("--out", type=Path, default=Path("fhir/CodeSystem-icpc2E-DK.json"))
     parser.add_argument("--only-if-changed", action="store_true", help="Preserve existing output when only source stamps/provenance changed")
@@ -391,10 +423,11 @@ def main(argv=None) -> int:
     if args.source_file and not args.source_url:
         parser.error("--source-file requires --source-url")
     try:
-        release, table, rows, labels, details = load_source(
+        release, table, rows, labels, details, _ = load_source(
             args.source_url, args.source_file, args.reference_file, args.cache_dir, args.table)
         guidance, guidance_details = select_guidance(rows, labels, release)
-        resource = build_supplement(labels, release, table, details["resolved_conflicts"], guidance)
+        resource = build_supplement(labels, release, table, details["resolved_conflicts"], guidance,
+                                    details["base_version"])
         changed = write_resource(resource, args.out, args.only_if_changed)
         report = {"source_url": release.url, "source_version": release.version, "source_date": release.date,
                   "table": table, "concepts": len(labels), "changed": changed, **details, **guidance_details}
@@ -407,7 +440,7 @@ def main(argv=None) -> int:
                 handle.write(f"changed={str(changed).lower()}\n")
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
-    except (ValueError, OSError, ET.ParseError, zipfile.BadZipFile, subprocess.TimeoutExpired) as exc:
+    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         print(f"ICPC generation failed: {exc}", file=sys.stderr)
         return 1
 

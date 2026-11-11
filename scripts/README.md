@@ -212,14 +212,14 @@ python3 scripts/icpc2_icd10_conceptmap.py \
 python3 scripts/icpc2_icd10_conceptmap.py \
   --source-url https://web.kiap.dk/resources/files/icpc/systemhuse/ICPC_v4_4_20260629.accdb \
   --source-file .icpc-kiap-cache/ICPC_v4_4_20260629.accdb \
-  --reference-file .icpc-kiap-cache/ICPC-2e-v7.0.zip \
+  --reference-file .icpc-kiap-cache/icpc-2.json \
   --icd10-file .icpc-kiap-cache/icd10.json \
   --supplement-out fhir/CodeSystem-icpc2E-DK.json
 ```
 
 Without `--supplement-out`, only the ConceptMap is written. Online runs
 discover and download the latest KiAP database and fetch the international
-ICD-10 CodeSystem from `tx.fhir.org/r4`. The Danish extensions and SKS diagnoses
+ICD-10 and base ICPC-2 CodeSystems from `tx.fhir.org/r4`. The Danish extensions and SKS diagnoses
 are read from the committed `fhir/` snapshots; `--extensions-file` and
 `--sks-file` can override these. The source loader, ICPC code validation, validity
 parser, reviewed label resolutions and coding-guidance extraction are shared
@@ -247,9 +247,45 @@ scope.
 - Require active mappings for all expected ICPC symptom/diagnosis codes.
   Unknown flags, conflicting duplicate pairs, schema changes and unknown
   codes fail before either resource is written.
-- Version/date identify the KiAP source release. With `--only-if-changed`,
+- The base ICPC-2 CodeSystem on `tx.fhir.org` carries its own international
+  WONCA mapping in an `icd10` property (about 9,900 pairs, international ICD-10
+  only). KiAP's Danish mapping is a different selection — only 187 of the 686
+  codes have identical international targets — and adds Danish-extension
+  targets, so this ConceptMap is not derived from or replaced by that property.
+  See [the comparison](#comparison-with-the-base-icd10-property) below.
+- `version` combines the KiAP version with the release date in the source
+  filename (`4.4.20260629`); `date` is that release date. The database itself
+  does not state the release date. With `--only-if-changed`,
   date/filename-only re-exports preserve the existing snapshot. Mapping,
   label, flag and target-system/version changes cause an update.
+
+### Comparison with the base `icd10` property
+
+Every run compares KiAP's mapping with the base system's `icd10` property.
+There is no separate script; the result is the `base_icd10_comparison` section
+of the report that the generator prints and, with `--report PATH`, saves as
+JSON (the first command above writes `.icpc-kiap-cache/report.json`, which is
+git-ignored). Only international ICD-10 targets are comparable, because the
+base cannot contain Danish-extension or SKS targets.
+
+| Field | Meaning | KiAP 4.4 vs base 7.0 |
+|---|---|---|
+| `base_version` | Version of the base ICPC-2 CodeSystem compared against | `7.0` |
+| `base_pairs` | ICPC → international ICD-10 pairs in the base, for the ICPC codes in the ConceptMap | 9,912 |
+| `conceptmap_international_pairs` | Pairs in the ConceptMap's international ICD-10 group | 1,910 |
+| `conceptmap_other_pairs` | Pairs to Danish extensions or SKS-only codes | 566 |
+| `codes.identical` | ICPC codes with the same international targets in both | 187 |
+| `codes.conceptmap_subset_of_base` | ICPC codes where KiAP's international targets are a strict subset of the base's | 452 |
+| `codes.conceptmap_superset_of_base` | ICPC codes where KiAP's are a strict superset | 8 |
+| `codes.differing` | ICPC codes where each side has targets the other lacks | 39 |
+| `codes_without_international_target` | ICPC codes KiAP maps only to Danish extensions | 63 |
+| `pairs_only_in_base` | Number of base pairs absent from the ConceptMap | 8,072 |
+| `pairs_only_in_conceptmap` | List of KiAP international pairs absent from the base (`code`, `target`) | 70 pairs |
+
+The scheduled workflow puts `codes.identical`, `pairs_only_in_base` and the
+number of `pairs_only_in_conceptmap` in the update PR body. The comparison is
+informational: it never alters the ConceptMap and does not by itself trigger
+an update PR.
 
 The resource remains `draft` and `experimental`. WONCA/DSAM attribution and
 usage conditions are preserved; automation does not grant additional rights.
@@ -271,14 +307,18 @@ The supplement also declares five custom `string` properties in
 
 | KiAP column | Property code | Meaning |
 |---|---|---|
-| `Kriterier` | `criteria` | Criteria for assigning the ICPC concept |
-| `Inkl` | `inclusion` | Included terms and conditions |
-| `Ekskl` | `exclusion` | Conditions to code elsewhere and their cross-references |
-| `Overvej` | `consider` | Alternative ICPC concepts to consider |
-| `Bemærk` | `note` | Supplementary coding notes |
+| `Kriterier` | `criteria-da` | Criteria for assigning the ICPC concept |
+| `Inkl` | `inclusion-da` | Included terms and conditions |
+| `Ekskl` | `exclusion-da` | Conditions to code elsewhere and their cross-references |
+| `Overvej` | `consider-da` | Alternative ICPC concepts to consider |
+| `Bemærk` | `note-da` | Supplementary coding notes |
+
+The base ICPC-2 CodeSystem on `tx.fhir.org` already defines `criteria`,
+`inclusion`, `exclusion`, `consider` and `note` with English text. The `-da`
+suffix keeps the Danish KiAP values distinguishable from them in a `$lookup`.
 
 Property URIs use the supplement canonical plus a fragment, for example
-`http://hl7.dk/fhir/core/CodeSystem/icpc2E-DK#criteria`.
+`http://hl7.dk/fhir/core/CodeSystem/icpc2E-DK#criteria-da`.
 These are local property definitions, not standard FHIR properties or extensions.
 The resource's `language: da` applies to the narrative guidance.
 
@@ -329,7 +369,7 @@ python3 scripts/icpc2_da_supplement.py \
 python3 scripts/icpc2_da_supplement.py \
   --source-url https://web.kiap.dk/resources/files/icpc/systemhuse/ICPC_v4_4_20260629.accdb \
   --source-file .icpc-kiap-cache/ICPC_v4_4_20260629.accdb \
-  --reference-file .icpc-kiap-cache/ICPC-2e-v7.0.zip \
+  --reference-file .icpc-kiap-cache/icpc-2.json \
   --out /tmp/CodeSystem-icpc2E-DK.json
 
 python3 -m unittest discover -s tests -v
@@ -337,8 +377,8 @@ python3 -m unittest discover -s tests -v
 
 There are no Python package dependencies. `mdb-tables` and `mdb-export` read the
 Access database; Access macros and queries are not run. Source data is refreshed
-on every online run (including updates under the same filename), and the
-international reference ZIP is cached in `.icpc-kiap-cache/`. The latest KiAP
+on every online run (including updates under the same filename), as is the base
+ICPC-2 CodeSystem, saved as `.icpc-kiap-cache/icpc-2.json` for offline reuse. The latest KiAP
 release is selected by numeric release version, then the date in its filename;
 it is not selected by page order. Changed naming conventions require review.
 
@@ -347,10 +387,14 @@ it is not selected by page order. Changed naming conventions require review.
 - Emit a `da` designation for each international symptom/diagnosis code. The
   initial KiAP 4.4 snapshot contains 686 codes.
 - Normalize whitespace, keeping KiAP's wording, abbreviations and punctuation.
-- Validate codes against the pinned international ICPC-2e v7.0 ClaML archive
-  published by Helsedirektoratet on behalf of WICC. A new KiAP code absent from
-  that reference fails generation, so the reference must be reviewed before
-  expanding the supplement. Missing expected codes and empty labels also fail.
+- Validate codes against the base ICPC-2 CodeSystem
+  (`http://hl7.org/fhir/sid/icpc-2`) fetched from `tx.fhir.org/r4` — the system
+  the supplement is applied to. Its symptom/diagnosis codes are those whose
+  `kind` is neither `chapter` nor `process`. A new KiAP code absent from the
+  base fails generation, as do missing expected codes and empty labels.
+- Pin `supplements` to the base version (`http://hl7.org/fhir/sid/icpc-2|7.0`),
+  as the Danish ICD-10 supplement does. A new base version is a substantive
+  change and produces an update PR.
 - Exclude `*00` grouping/unknown entries and process codes. They are outside
   this supplement's symptom/diagnosis scope.
 - KiAP 4.4 has conflicting labels across mapping rows. The reviewed selections
@@ -358,9 +402,10 @@ it is not selected by page order. Changed naming conventions require review.
   These are not unconditional overrides: only the exact reviewed sets of
   conflicting labels are accepted. A new conflict or changed set fails with
   its code and labels. If KiAP resolves a conflict to a single label, use it.
-- Set `version` and `date` to the source filename's release date, initially
-  `2026-06-29`. The KiAP business version (`4.4`), exact URL, table, and applied
-  conflict resolutions are recorded in the description. Identical inputs
+- Set `version` to the KiAP business version plus the source filename's release
+  date (`4.4.20260629`) and `date` to that release date (`2026-06-29`). The
+  exact URL, table, and applied conflict resolutions are recorded in the
+  description. Identical inputs
   produce identical output.
 - Preserve WONCA/DSAM attribution and licensing references. Automation does
   not grant additional usage or redistribution rights.

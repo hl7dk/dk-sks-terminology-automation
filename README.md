@@ -19,7 +19,9 @@ The SKS CodeSystems, Danish ICD-10 extensions and ICPC-to-ICD-10 ConceptMap
 are published to the [Nordic terminology server](https://tx-nordics.fhir.org/fhir).
 The Danish ICD-10 and ICPC-2 supplements are distributed through
 [`packages/fhir.tx.support/package/` in FHIR/packages](https://github.com/FHIR/packages/tree/master/packages/fhir.tx.support/package),
-alongside their international base systems on `tx.fhir.org`.
+alongside their international base systems on `tx.fhir.org`. Both the base
+ICPC-2 (`http://hl7.org/fhir/sid/icpc-2`) and the Danish ICPC-2 supplement are
+loaded there.
 
 ### Registering a new code system with the terminology servers
 
@@ -42,13 +44,14 @@ system.** Use the publishing destinations below when reviewing an update.
 | `CodeSystem-sks-diagnoses.json` | The legacy SKS diagnosis register (the "D-hierarchy", Danish ICD-10 with `D`-prefixed codes). `content: complete` under `urn:oid:1.2.208.176.2.4.12`. Keeps the 3.7.0-style SKS diagnosis codings resolvable alongside the ICD-10-based model. | Nordic terminology server |
 | `CodeSystem-icd10-danish-extensions.json` | Danish diagnosis codes that are not plain ICD-10 (extensions + Danish-only blocks). | Nordic terminology server |
 | `CodeSystem-icd10-da.json` | A **supplement** adding Danish `da` designations to the international ICD-10 codes Denmark reuses. | `FHIR/packages`: `packages/fhir.tx.support/package/` |
-| `CodeSystem-icpc2E-DK.json` | A **supplement** adding KiAP Danish symptom/diagnosis labels and narrative coding-guidance properties to international ICPC-2. | `FHIR/packages`: `packages/fhir.tx.support/package/` |
-| `ConceptMap-icpc2-icd10.json` | ICPC-2 → ICD-10 mapping from KiAP's forward conversion table, with international and Danish-extension targets under their respective systems. | Nordic terminology server |
+| `CodeSystem-icpc2E-DK.json` | A **supplement** adding KiAP Danish symptom/diagnosis labels and narrative coding-guidance properties (`criteria-da`, `inclusion-da`, …) to international ICPC-2, pinned to the base version on `tx.fhir.org`. | `FHIR/packages`: `packages/fhir.tx.support/package/` |
+| `ConceptMap-icpc2-icd10.json` | ICPC-2 → ICD-10 mapping from KiAP's forward conversion table, with international and Danish-extension targets under their respective systems. This Danish mapping differs from the WONCA mapping in the base system's `icd10` property. | Nordic terminology server |
 
 By default, SKS-derived resources use the `SKScomplete.txt` `Last-Modified`
 date for `version` and `date`; without that metadata the generator falls back
-to the run date. KiAP-derived resources use the release date in the Access
-filename. The update workflows retain the previous snapshot when only ignored
+to the run date. KiAP-derived resources combine the KiAP version and the release
+date in the Access filename for `version` (for example `4.4.20260629`) and use
+that release date for `date`. The update workflows retain the previous snapshot when only ignored
 metadata changes, so resources can legitimately retain different source dates.
 See [versioning and change detection](scripts/README.md) for the exact rules.
 
@@ -72,6 +75,26 @@ cp sks-icd10-out/CodeSystem-sks.json \
 python3 scripts/icpc2_icd10_conceptmap.py \
   --supplement-out fhir/CodeSystem-icpc2E-DK.json --only-if-changed
 ```
+
+### Comparison with the base ICPC-2 mapping
+
+The base ICPC-2 CodeSystem on `tx.fhir.org` carries its own international
+(WONCA) ICD-10 mapping in an `icd10` property. KiAP's Danish mapping in
+`ConceptMap-icpc2-icd10.json` is a different selection. There is no separate
+comparison script: `scripts/icpc2_icd10_conceptmap.py` compares the two on
+every run and includes the result in its report. Add `--report` to save it:
+
+```bash
+python3 scripts/icpc2_icd10_conceptmap.py \
+  --supplement-out fhir/CodeSystem-icpc2E-DK.json \
+  --only-if-changed --report .icpc-kiap-cache/report.json
+```
+
+The comparison is the `base_icd10_comparison` section of that JSON, which is
+also printed to the terminal. `.icpc-kiap-cache/` is git-ignored, so the report
+is not committed; the scheduled workflow puts the headline counts in the update
+PR body. See [the field reference](scripts/README.md#comparison-with-the-base-icd10-property).
+The comparison is informational and never alters the ConceptMap.
 
 ## Automation
 
