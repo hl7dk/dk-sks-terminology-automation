@@ -252,17 +252,40 @@ scope.
   only). KiAP's Danish mapping is a different selection — only 187 of the 686
   codes have identical international targets — and adds Danish-extension
   targets, so this ConceptMap is not derived from or replaced by that property.
-  Every run compares the two and writes `base_icd10_comparison` to the report:
-  pair totals, the number of ICPC codes whose international targets are
-  identical, a subset, a superset or otherwise differing, codes with no
-  international target, and the KiAP pairs absent from the base. The update
-  PR body carries the headline counts. The comparison is informational and
-  never alters the ConceptMap.
+  See [the comparison](#comparison-with-the-base-icd10-property) below.
 - `version` combines the KiAP version with the release date in the source
   filename (`4.4.20260629`); `date` is that release date. The database itself
   does not state the release date. With `--only-if-changed`,
   date/filename-only re-exports preserve the existing snapshot. Mapping,
   label, flag and target-system/version changes cause an update.
+
+### Comparison with the base `icd10` property
+
+Every run compares KiAP's mapping with the base system's `icd10` property.
+There is no separate script; the result is the `base_icd10_comparison` section
+of the report that the generator prints and, with `--report PATH`, saves as
+JSON (the first command above writes `.icpc-kiap-cache/report.json`, which is
+git-ignored). Only international ICD-10 targets are comparable, because the
+base cannot contain Danish-extension or SKS targets.
+
+| Field | Meaning | KiAP 4.4 vs base 7.0 |
+|---|---|---|
+| `base_version` | Version of the base ICPC-2 CodeSystem compared against | `7.0` |
+| `base_pairs` | ICPC → international ICD-10 pairs in the base, for the ICPC codes in the ConceptMap | 9,912 |
+| `conceptmap_international_pairs` | Pairs in the ConceptMap's international ICD-10 group | 1,910 |
+| `conceptmap_other_pairs` | Pairs to Danish extensions or SKS-only codes | 566 |
+| `codes.identical` | ICPC codes with the same international targets in both | 187 |
+| `codes.conceptmap_subset_of_base` | ICPC codes where KiAP's international targets are a strict subset of the base's | 452 |
+| `codes.conceptmap_superset_of_base` | ICPC codes where KiAP's are a strict superset | 8 |
+| `codes.differing` | ICPC codes where each side has targets the other lacks | 39 |
+| `codes_without_international_target` | ICPC codes KiAP maps only to Danish extensions | 63 |
+| `pairs_only_in_base` | Number of base pairs absent from the ConceptMap | 8,072 |
+| `pairs_only_in_conceptmap` | List of KiAP international pairs absent from the base (`code`, `target`) | 70 pairs |
+
+The scheduled workflow puts `codes.identical`, `pairs_only_in_base` and the
+number of `pairs_only_in_conceptmap` in the update PR body. The comparison is
+informational: it never alters the ConceptMap and does not by itself trigger
+an update PR.
 
 The resource remains `draft` and `experimental`. WONCA/DSAM attribution and
 usage conditions are preserved; automation does not grant additional rights.

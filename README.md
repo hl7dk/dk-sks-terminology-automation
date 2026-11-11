@@ -76,6 +76,26 @@ python3 scripts/icpc2_icd10_conceptmap.py \
   --supplement-out fhir/CodeSystem-icpc2E-DK.json --only-if-changed
 ```
 
+### Comparison with the base ICPC-2 mapping
+
+The base ICPC-2 CodeSystem on `tx.fhir.org` carries its own international
+(WONCA) ICD-10 mapping in an `icd10` property. KiAP's Danish mapping in
+`ConceptMap-icpc2-icd10.json` is a different selection. There is no separate
+comparison script: `scripts/icpc2_icd10_conceptmap.py` compares the two on
+every run and includes the result in its report. Add `--report` to save it:
+
+```bash
+python3 scripts/icpc2_icd10_conceptmap.py \
+  --supplement-out fhir/CodeSystem-icpc2E-DK.json \
+  --only-if-changed --report .icpc-kiap-cache/report.json
+```
+
+The comparison is the `base_icd10_comparison` section of that JSON, which is
+also printed to the terminal. `.icpc-kiap-cache/` is git-ignored, so the report
+is not committed; the scheduled workflow puts the headline counts in the update
+PR body. See [the field reference](scripts/README.md#comparison-with-the-base-icd10-property).
+The comparison is informational and never alters the ConceptMap.
+
 ## Automation
 
 `.github/workflows/sks-update.yml` runs on the quarterly SKS cadence (and on
