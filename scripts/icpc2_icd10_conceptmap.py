@@ -158,6 +158,53 @@ def build_conceptmap(rows: list[dict], labels: dict[str, str], release: kiap.Rel
     return resource, report
 
 
+def compare_with_base(resource: dict, base: dict) -> dict:
+    """Compare KiAP's mapping with the WONCA mapping in the base system's icd10 property.
+
+    Informational only: the ConceptMap reproduces KiAP's table and is not
+    altered by the result. Only international ICD-10 targets are comparable;
+    Danish-extension and SKS targets cannot occur in the base.
+    """
+    ours, other_pairs = defaultdict(set), 0
+    for group in resource["group"]:
+        for element in group["element"]:
+            codes = {target["code"] for target in element["target"]}
+            if group["target"] == ICD10_SYSTEM:
+                ours[element["code"]] |= codes
+            else:
+                other_pairs += len(codes)
+            ours.setdefault(element["code"], set())
+    theirs = {}
+    for concept in kiap.concepts(base):
+        if concept["code"] in ours:
+            theirs[concept["code"]] = {
+                p["valueCoding"]["code"] for p in concept.get("property", [])
+                if p.get("code") == "icd10" and p.get("valueCoding", {}).get("system") == ICD10_SYSTEM}
+    counts = {"identical": 0, "conceptmap_subset_of_base": 0, "conceptmap_superset_of_base": 0, "differing": 0}
+    only_ours = []
+    for code in sorted(ours):
+        mine, base_targets = ours[code], theirs.get(code, set())
+        if mine == base_targets:
+            counts["identical"] += 1
+        elif mine < base_targets:
+            counts["conceptmap_subset_of_base"] += 1
+        elif mine > base_targets:
+            counts["conceptmap_superset_of_base"] += 1
+        else:
+            counts["differing"] += 1
+        only_ours.extend({"code": code, "target": target} for target in sorted(mine - base_targets))
+    return {
+        "base_version": base.get("version"),
+        "base_pairs": sum(map(len, theirs.values())),
+        "conceptmap_international_pairs": sum(map(len, ours.values())),
+        "conceptmap_other_pairs": other_pairs,
+        "codes": counts,
+        "codes_without_international_target": sum(1 for targets in ours.values() if not targets),
+        "pairs_only_in_base": sum(len(theirs.get(code, set()) - ours[code]) for code in ours),
+        "pairs_only_in_conceptmap": only_ours,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-url", help="Specific KiAP release; default: discover latest")
@@ -176,7 +223,7 @@ def main(argv=None) -> int:
     if args.source_file and not args.source_url:
         parser.error("--source-file requires --source-url")
     try:
-        release, table, rows, labels, details = kiap.load_source(
+        release, table, rows, labels, details, base = kiap.load_source(
             args.source_url, args.source_file, args.reference_file, args.cache_dir, args.table)
         required = {"ICPC-kode", "ICD10-kode", "ICD10-diagnose", "Udl", "Gyldig fra dato"}
         if not rows or not required <= rows[0].keys():
@@ -201,7 +248,8 @@ def main(argv=None) -> int:
         report = {"source_url": release.url, "source_version": release.version, "source_date": release.date,
                   "table": table, "concepts": len(labels), "conceptmap_changed": map_changed,
                   "supplement_changed": supplement_changed, "changed": map_changed or supplement_changed,
-                  **details, **stats, **guidance_details}
+                  **details, **stats, **guidance_details,
+                  "base_icd10_comparison": compare_with_base(resource, base)}
         if args.report:
             kiap.atomic_write(args.report, (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
         if os.environ.get("GITHUB_OUTPUT"):
@@ -209,6 +257,10 @@ def main(argv=None) -> int:
                 for key in ("source_url", "source_version", "source_date", "concepts", "mapping_pairs"):
                     handle.write(f"{key}={report[key]}\n")
                 handle.write(f"changed={str(report['changed']).lower()}\n")
+                comparison = report["base_icd10_comparison"]
+                handle.write(f"base_identical_codes={comparison['codes']['identical']}\n")
+                handle.write(f"base_only_pairs={comparison['pairs_only_in_base']}\n")
+                handle.write(f"kiap_only_pairs={len(comparison['pairs_only_in_conceptmap'])}\n")
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:

@@ -97,6 +97,7 @@ jobs:
             - KiAP release: ${{ steps.generate.outputs.source_version }} (${{ steps.generate.outputs.source_date }})
             - Concepts: ${{ steps.generate.outputs.concepts }}
             - Mapping pairs: ${{ steps.generate.outputs.mapping_pairs }}
+            - Versus the base ICPC-2 `icd10` property (informational): ${{ steps.generate.outputs.base_identical_codes }} codes with identical international targets, ${{ steps.generate.outputs.base_only_pairs }} pairs only in the base, ${{ steps.generate.outputs.kiap_only_pairs }} pairs only in KiAP
             - Generator: `scripts/icpc2_icd10_conceptmap.py`
 
             Codes are checked against the base ICPC-2 CodeSystem on tx.fhir.org. Known source

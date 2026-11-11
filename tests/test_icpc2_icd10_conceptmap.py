@@ -28,6 +28,16 @@ def catalogs():
             codesystem(mapping.SKS_SYSTEM, [{"code": "DX999", "display": "SKS only"}])]
 
 
+def base(mapped):
+    """Base ICPC-2 CodeSystem with its WONCA mapping in icd10 properties."""
+    return {"resourceType": "CodeSystem", "url": mapping.kiap.SYSTEM, "version": "7.0", "concept": [
+        {"code": "A", "concept": [
+            {"code": code, "property": [{"code": "kind", "valueCode": "symptom"}] + [
+                {"code": "icd10", "valueCoding": {"system": mapping.ICD10_SYSTEM, "code": target}}
+                for target in targets]}
+            for code, targets in mapped.items()]}]}
+
+
 def row(code="A01", target="DR529", flag="1", history="200801012026050125000101"):
     return {"ICPC-kode": code, "ICPC-diagnose": "Almen smerte", "ICD10-kode": target,
             "ICD10-diagnose": "Smerte UNS", "Udl": flag, "Gyldig fra dato": history,
@@ -126,6 +136,28 @@ class MappingTests(unittest.TestCase):
                 mapping.kiap.validity("A01", "DR521", history)
 
 
+class BaseComparisonTests(unittest.TestCase):
+    def test_classifies_codes_and_lists_pairs_missing_from_base(self):
+        def element(code, *targets):
+            return {"code": code, "target": [{"code": target} for target in targets]}
+        resource = {"group": [
+            {"target": mapping.ICD10_SYSTEM, "element": [
+                element("A01", "R52.9"), element("A02", "R68.8"), element("A03", "R50.8", "R50.9"),
+                element("A04", "G93.3")]},
+            {"target": mapping.EXTENSIONS_SYSTEM, "element": [element("A04", "R53.9"), element("A05", "R53.9E")]}]}
+        result = mapping.compare_with_base(resource, base({
+            "A01": ["R52.9"], "A02": ["R68.8", "R68.0"], "A03": ["R50.8"], "A04": ["R53"],
+            "A05": ["R53"], "A99": ["R69"]}))
+        self.assertEqual(result["codes"], {"identical": 1, "conceptmap_subset_of_base": 2,
+                                           "conceptmap_superset_of_base": 1, "differing": 1})
+        self.assertEqual((result["base_pairs"], result["conceptmap_international_pairs"],
+                          result["conceptmap_other_pairs"]), (6, 5, 2))
+        self.assertEqual(result["codes_without_international_target"], 1)
+        self.assertEqual(result["pairs_only_in_base"], 3)
+        self.assertEqual(result["pairs_only_in_conceptmap"], [
+            {"code": "A03", "target": "R50.9"}, {"code": "A04", "target": "G93.3"}])
+
+
 class PublicationTests(unittest.TestCase):
     def test_content_change_writes_but_source_reexport_does_not(self):
         resource, _ = build()
@@ -142,7 +174,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_shared_generation_and_failure_preserve_both_outputs(self):
         source = (RELEASE, "ICPCKON2-v4", [row()], {"A01": "Almen smerte"},
-                  {"resolved_conflicts": {}, "base_version": "7.0"})
+                  {"resolved_conflicts": {}, "base_version": "7.0"}, base({"A01": ["R52.9"]}))
         source[2][0]["Kriterier"] = "Danske kriterier"
         with tempfile.TemporaryDirectory() as directory, patch.object(mapping.kiap, "load_source", return_value=source) as load:
             root = Path(directory)
@@ -158,6 +190,8 @@ class PublicationTests(unittest.TestCase):
                 self.assertEqual(mapping.main(args), 0)
                 load.assert_called_once()
                 self.assertIn("mapping_pairs=1", (root / "outputs").read_text())
+                self.assertIn("base_identical_codes=1\nbase_only_pairs=0\nkiap_only_pairs=0",
+                              (root / "outputs").read_text())
                 self.assertEqual(json.loads(supplement.read_text())["concept"][0]["property"],
                                  [{"code": "criteria-da", "valueString": "Danske kriterier"}])
                 self.assertEqual(json.loads(output.read_text())["version"], "4.4.20260629")

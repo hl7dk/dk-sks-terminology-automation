@@ -252,6 +252,12 @@ scope.
   only). KiAP's Danish mapping is a different selection — only 187 of the 686
   codes have identical international targets — and adds Danish-extension
   targets, so this ConceptMap is not derived from or replaced by that property.
+  Every run compares the two and writes `base_icd10_comparison` to the report:
+  pair totals, the number of ICPC codes whose international targets are
+  identical, a subset, a superset or otherwise differing, codes with no
+  international target, and the KiAP pairs absent from the base. The update
+  PR body carries the headline counts. The comparison is informational and
+  never alters the ConceptMap.
 - `version` combines the KiAP version with the release date in the source
   filename (`4.4.20260629`); `date` is that release date. The database itself
   does not state the release date. With `--only-if-changed`,

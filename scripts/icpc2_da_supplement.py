@@ -392,8 +392,8 @@ def write_resource(resource: dict, output: Path, only_if_changed: bool) -> bool:
 
 def load_source(source_url: str | None, source_file: Path | None,
                 reference_file: Path | None, cache_dir: Path,
-                table: str | None = None) -> tuple[Release, str, list[dict], dict, dict]:
-    """Acquire and validate one KiAP snapshot, shared by both generators."""
+                table: str | None = None) -> tuple[Release, str, list[dict], dict, dict, dict]:
+    """Acquire and validate one KiAP snapshot and the base CodeSystem, shared by both generators."""
     if source_file and not source_url:
         raise ValueError("--source-file requires --source-url")
     release = parse_release(source_url) if source_url else discover_release(fetch(KIAP_PAGE).decode("utf-8"))
@@ -402,10 +402,11 @@ def load_source(source_url: str | None, source_file: Path | None,
     else:
         database = cache_dir / Path(urllib.parse.urlsplit(release.url).path).name
         atomic_write(database, fetch(release.url))
-    base_codes, base_version = reference_codes(load_base(reference_file, cache_dir))
+    base = load_base(reference_file, cache_dir)
+    base_codes, base_version = reference_codes(base)
     table, rows = read_rows(database, table)
     labels, details = select_labels(rows, base_codes)
-    return release, table, rows, labels, {**details, "base_version": base_version}
+    return release, table, rows, labels, {**details, "base_version": base_version}, base
 
 
 def main(argv=None) -> int:
@@ -422,7 +423,7 @@ def main(argv=None) -> int:
     if args.source_file and not args.source_url:
         parser.error("--source-file requires --source-url")
     try:
-        release, table, rows, labels, details = load_source(
+        release, table, rows, labels, details, _ = load_source(
             args.source_url, args.source_file, args.reference_file, args.cache_dir, args.table)
         guidance, guidance_details = select_guidance(rows, labels, release)
         resource = build_supplement(labels, release, table, details["resolved_conflicts"], guidance,
