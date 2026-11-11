@@ -141,7 +141,8 @@ class PublicationTests(unittest.TestCase):
             self.assertTrue(mapping.kiap.write_resource(changed, out, True))
 
     def test_shared_generation_and_failure_preserve_both_outputs(self):
-        source = (RELEASE, "ICPCKON2-v4", [row()], {"A01": "Almen smerte"}, {"resolved_conflicts": {}})
+        source = (RELEASE, "ICPCKON2-v4", [row()], {"A01": "Almen smerte"},
+                  {"resolved_conflicts": {}, "base_version": "7.0"})
         source[2][0]["Kriterier"] = "Danske kriterier"
         with tempfile.TemporaryDirectory() as directory, patch.object(mapping.kiap, "load_source", return_value=source) as load:
             root = Path(directory)
@@ -158,7 +159,9 @@ class PublicationTests(unittest.TestCase):
                 load.assert_called_once()
                 self.assertIn("mapping_pairs=1", (root / "outputs").read_text())
                 self.assertEqual(json.loads(supplement.read_text())["concept"][0]["property"],
-                                 [{"code": "criteria", "valueString": "Danske kriterier"}])
+                                 [{"code": "criteria-da", "valueString": "Danske kriterier"}])
+                self.assertEqual(json.loads(output.read_text())["version"], "4.4.20260629")
+                self.assertEqual(json.loads(supplement.read_text())["supplements"], mapping.kiap.SYSTEM + "|7.0")
                 before = output.read_bytes(), supplement.read_bytes()
                 # A valid map with invalid guidance must preserve both published artifacts.
                 del source[2][0]["Bemærk"]

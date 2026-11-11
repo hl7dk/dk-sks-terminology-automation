@@ -99,7 +99,7 @@ jobs:
             - Mapping pairs: ${{ steps.generate.outputs.mapping_pairs }}
             - Generator: `scripts/icpc2_icd10_conceptmap.py`
 
-            Codes are checked against international ICPC-2e v7.0. Known source
+            Codes are checked against the base ICPC-2 CodeSystem on tx.fhir.org. Known source
             label conflicts are handled explicitly; new conflicts fail generation.
             Every mapping target is checked against its CodeSystem. Preferred
             matches are retained without asserting clinical equivalence.
